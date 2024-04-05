@@ -75,20 +75,15 @@
 #include <numeric>
 #include <queue>
 #include <sstream>
-#include <unordered_map>
 #include <cmath>
 #include <algorithm>
 #include <profiling/stopwatch.h>
 #include <sparsehash/dense_hash_map>
 #include <phmap_interface/phmap_interface.h>
 
-#include <omp.h>
 #include <thrust/fill.h>
 #include <thrust/device_vector.h>
-#include <thrust/scan.h>
 #include <thrust/execution_policy.h>
-#include <thrust/unique.h>
-#include <thrust/sort.h>
 #include <cuda_runtime.h>
 #ifdef CPUONLY_SPARSE_HASHMAP
 #include <sparsehash/sparse_hash_map>
