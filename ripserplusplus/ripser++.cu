@@ -198,13 +198,12 @@ class binomial_coeff_table {
     index_t max_tuple_length;
 
 #define BINOM_TRANSPOSE(i,j) ((j)*(num_n)+(i))
-#define BINOM(i,j) ((i)*(max_tuple_length)+(j))
 public:
     index_t* binoms;
 
     binomial_coeff_table(index_t n, index_t k) {
         binoms= (index_t*)malloc(sizeof(index_t)*(n+1)*(k+1));
-        if(binoms==NULL){
+        if(binoms == nullptr){
             std::cerr<<"malloc for binoms failed"<<std::endl;
             exit(1);
         }
@@ -343,12 +342,12 @@ private:
 
         if (dist.capacity == 0) {
             dist.entries= (value_t *) malloc(sizeof(value_t) * size() * 10);
-            if(dist.entries==NULL){
+            if(dist.entries == nullptr){
                 std::cerr<<"entries could not be malloced"<<std::endl;
                 exit(1);
             }
             dist.col_indices= (index_t *) malloc(sizeof(index_t) * size() * 10);
-            if(dist.col_indices==NULL){
+            if(dist.col_indices == nullptr){
                 std::cerr<<"col_indices could not be malloced"<<std::endl;
                 exit(1);
             }
@@ -358,12 +357,12 @@ private:
         if (dist.num_entries >= dist.capacity) {
             dist.capacity*= 2;
             dist.entries= (value_t *) realloc(dist.entries, sizeof(value_t) * dist.capacity);
-            if(dist.entries==NULL){
+            if(dist.entries == nullptr){
                 std::cerr<<"col_indices could not be realloced with double memory"<<std::endl;
                 exit(1);
             }
             dist.col_indices= (index_t *) realloc(dist.col_indices, sizeof(index_t) * dist.capacity);
-            if(dist.col_indices==NULL){
+            if(dist.col_indices == nullptr){
                 std::cerr<<"col_indices could not be realloced with double memory"<<std::endl;
                 exit(1);
             }
@@ -388,17 +387,17 @@ public:
         dist.num_entries= 0;
         dist.capacity= num_entries;//this sets the matrix to exactly num_entries memory allocation
         dist.offsets= (index_t*) malloc(sizeof(index_t)*(size()+1));
-        if(dist.offsets==NULL){
+        if(dist.offsets == nullptr){
             std::cerr<<"malloc for offsets failed"<<std::endl;
             exit(1);
         }
         dist.col_indices= (index_t*) malloc(sizeof(index_t)*dist.capacity);
-        if(dist.col_indices==NULL){
+        if(dist.col_indices == nullptr){
             std::cerr<<"malloc for col_indices failed"<<std::endl;
             exit(1);
         }
         dist.entries= (value_t*) malloc(sizeof(value_t)*dist.capacity);
-        if(dist.entries==NULL){
+        if(dist.entries == nullptr){
             std::cerr<<"malloc for entries failed"<<std::endl;
             exit(1);
         }
@@ -1585,10 +1584,10 @@ private:
     binomial_coeff_table* d_binomial_coeff;//GPU copy of the binomial coefficient table
     index_t* h_d_binoms;
 
-    index_t* d_num_columns_to_reduce=NULL;//use d_num_columns_to_reduce to keep track of the number of columns to reduce
+    index_t* d_num_columns_to_reduce = nullptr;//use d_num_columns_to_reduce to keep track of the number of columns to reduce
     index_t* h_num_columns_to_reduce;//h_num_columns_to_reduce is tied to d_num_columns_to_reduce in pinned memory?
 
-    index_t* d_num_nonapparent= NULL;//the number of nonapparent columns. *d_num_columns_to_reduce-*d_num_nonapparent= number of apparent columns
+    index_t* d_num_nonapparent = nullptr;//the number of nonapparent columns. *d_num_columns_to_reduce-*d_num_nonapparent= number of apparent columns
     index_t* h_num_nonapparent;//h_num_nonapparent is tied to d_num_nonapparent in pinned memory?
 
     index_t num_apparent;//the number of apparent pairs found
@@ -1611,7 +1610,7 @@ private:
     //used for sparse_distance_matrix ONLY:
     struct diameter_index_t_struct* d_simplices;//GPU copy of h_simplices
     struct diameter_index_t_struct* h_simplices;//the simplices filtered by diameter that need to be considered for the next dimension's simplices
-    index_t* d_num_simplices=NULL;//use d_num_simplices to keep track of the number of simplices in h_ or d_ simplices
+    index_t* d_num_simplices = nullptr;//use d_num_simplices to keep track of the number of simplices in h_ or d_ simplices
     index_t* h_num_simplices;//h_num_simplices is tied to d_num_simplices in pinned memory
 public:
 
@@ -3078,7 +3077,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
         CUDACHECK(cudaMalloc((void **) &d_columns_to_reduce, sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims));
         h_columns_to_reduce= (struct diameter_index_t_struct*) malloc(sizeof(struct diameter_index_t_struct)* max_num_simplices_forall_dims);
 
-        if(h_columns_to_reduce==NULL){
+        if(h_columns_to_reduce == nullptr){
             std::cerr<<"malloc for h_columns_to_reduce failed"<<std::endl;
             exit(1);
         }
@@ -3092,7 +3091,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
         CUDACHECK(cudaMalloc((void **) &d_flagarray_OR_index_to_subindex, sizeof(index_t)*max_num_simplices_forall_dims));
 
         h_flagarray_OR_index_to_subindex= (index_t*) malloc(sizeof(index_t)*max_num_simplices_forall_dims);
-        if(h_flagarray_OR_index_to_subindex==NULL) {
+        if(h_flagarray_OR_index_to_subindex == nullptr) {
             std::cerr<<"malloc for h_index_to_subindex failed"<<std::endl;
         }
 #endif
@@ -3104,7 +3103,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
         //this array is used for both the pivot column index hash table array as well as the nonapparent cols array as an unstructured hashmap
         h_pivot_column_index_array_OR_nonapparent_cols= (index_t*) malloc(sizeof(index_t)*max_num_simplices_forall_dims);
 
-        if(h_pivot_column_index_array_OR_nonapparent_cols==NULL){
+        if(h_pivot_column_index_array_OR_nonapparent_cols == nullptr){
             std::cerr<<"malloc for h_pivot_column_index_array_OR_nonapparent_cols failed"<<std::endl;
             exit(1);
         }
@@ -3127,7 +3126,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
         CUDACHECK(cudaMalloc((void**) &d_lowest_one_of_apparent_pair, sizeof(index_t)*max_num_simplices_forall_dims));
         CUDACHECK(cudaMalloc((void**) &d_pivot_array, sizeof(struct index_t_pair_struct)*max_num_simplices_forall_dims));
         h_pivot_array= (struct index_t_pair_struct*) malloc(sizeof(struct index_t_pair_struct)*max_num_simplices_forall_dims);
-        if(h_pivot_array==NULL){
+        if(h_pivot_array == nullptr){
             std::cerr<<"malloc for h_pivot_array failed"<<std::endl;
             exit(1);
         }
@@ -3281,7 +3280,7 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
         h_columns_to_reduce = (struct diameter_index_t_struct *) malloc(
                 sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims);
 
-        if (h_columns_to_reduce == NULL) {
+        if (h_columns_to_reduce == nullptr) {
             std::cerr << "malloc for h_columns_to_reduce failed" << std::endl;
             exit(1);
         }
@@ -3291,7 +3290,7 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
                              sizeof(index_t) * max_num_simplices_forall_dims));
 
         h_flagarray_OR_index_to_subindex = (index_t *) malloc(sizeof(index_t) * max_num_simplices_forall_dims);
-        if (h_flagarray_OR_index_to_subindex == NULL) {
+        if (h_flagarray_OR_index_to_subindex == nullptr) {
             std::cerr << "malloc for h_index_to_subindex failed" << std::endl;
         }
 #endif
@@ -3327,7 +3326,7 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
         //this array is used for both the pivot column index hash table array as well as the nonapparent cols array as an unstructured hashmap
         h_pivot_column_index_array_OR_nonapparent_cols = (index_t *) malloc(
                 sizeof(index_t) * max_num_simplices_forall_dims);
-        if (h_pivot_column_index_array_OR_nonapparent_cols == NULL) {
+        if (h_pivot_column_index_array_OR_nonapparent_cols == nullptr) {
             std::cerr << "malloc for h_pivot_column_index_array_OR_nonapparent_cols failed" << std::endl;
             exit(1);
         }
@@ -3355,7 +3354,7 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
                              sizeof(struct index_t_pair_struct) * max_num_simplices_forall_dims));
         h_pivot_array = (struct index_t_pair_struct *) malloc(
                 sizeof(struct index_t_pair_struct) * max_num_simplices_forall_dims);
-        if (h_pivot_array == NULL) {
+        if (h_pivot_array == nullptr) {
             std::cerr << "malloc for h_pivot_array failed" << std::endl;
             exit(1);
         }
@@ -3364,7 +3363,7 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
         h_simplices = (struct diameter_index_t_struct *) malloc(
                 sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims);
 
-        if (h_simplices == NULL) {
+        if (h_simplices == nullptr) {
             std::cerr << "malloc for h_simplices failed" << std::endl;
             exit(1);
         }
