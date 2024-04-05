@@ -578,15 +578,15 @@ template <typename T> __global__ void populate_edges(T* d_flagarray, struct diam
 
         for (index_t k= 2; k > 0; --k) {
 
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
+            if(idx < (*d_binomial_coeff)(v, k)) {
                 index_t count= v;
                 while (count > 0) {
                     index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
+                    if (idx < (*d_binomial_coeff)(v - step, k)) {
                         v-= step + 1;
                         count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
+                    }
+                    else count= step;//went too far, need to try a smaller step size to subtract from top
                 }
             }
 
@@ -664,15 +664,15 @@ __global__ void populate_sparse_simplices_warpfiltering(struct diameter_index_t_
 
         for (index_t k= dim + 1; k > 0; --k) {
 
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
+            if(idx < (*d_binomial_coeff)(v, k)) {
                 index_t count= v;
                 while (count > 0) {
                     index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
+                    if(idx < (*d_binomial_coeff)(v - step, k)) {
                         v-= step + 1;
                         count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
+                    }
+                    else count= step;//went too far, need to try a smaller step size to subtract from top
                 }
             }
 
@@ -815,15 +815,15 @@ template <typename T>__global__ void populate_columns_to_reduce(T* d_flagarray, 
 
         for (index_t k= dim + 1; k > 0; --k) {
 
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
+            if(idx < (*d_binomial_coeff)(v, k)) {
                 index_t count= v;
                 while (count > 0) {
                     index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
+                    if(idx < (*d_binomial_coeff)(v - step, k)) {
                         v-= step + 1;
                         count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
+                    }
+                    else count= step;//went too far, need to try a smaller step size to subtract from top
                 }
             }
 
@@ -889,15 +889,15 @@ __global__ void coboundary_findapparent_single_kernel(value_t* d_cidx_to_diamete
 
         for (index_t k= dim + 1; k > 0; --k) {
 
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
+            if(idx < (*d_binomial_coeff)(v, k)) {
                 index_t count= v;
                 while (count > 0) {
                     index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
+                    if(idx < (*d_binomial_coeff)(v - step, k)) {
                         v-= step + 1;
                         count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
+                    }
+                    else count= step;//went too far, need to try a smaller step size to subtract from top
                 }
             }
 
@@ -1069,15 +1069,15 @@ __global__ void coboundary_findapparent_sparse_single_kernel(struct diameter_ind
 
         for (index_t k= dim + 1; k > 0; --k) {
 
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
+            if(idx < (*d_binomial_coeff)(v, k)) {
                 index_t count= v;
                 while (count > 0) {
                     index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
+                    if(idx < (*d_binomial_coeff)(v - step, k)) {
                         v-= step + 1;
                         count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
+                    }
+                    else count= step;//went too far, need to try a smaller step size to subtract from top
                 }
             }
 
@@ -2850,7 +2850,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
 #ifdef PROFILING
     std::cerr<<"recalculated dim_max based on GPU free DRAM capacity: "<<gpu_dim_max<<std::endl;
 #endif
-    max_num_simplices_forall_dims= gpu_dim_max<(n/2)-1?get_num_simplices_for_dim(gpu_dim_max): get_num_simplices_for_dim((n/2)-1);
+    max_num_simplices_forall_dims = gpu_dim_max<(n/2)-1?get_num_simplices_for_dim(gpu_dim_max): get_num_simplices_for_dim((n/2)-1);
     if(gpu_dim_max>=1){
 #ifdef COUNTING
         std::cerr<<"max possible num simplices over all dim<=dim_max (without clearing) for memory allocation: "<<max_num_simplices_forall_dims<<std::endl;
