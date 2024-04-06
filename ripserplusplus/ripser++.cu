@@ -3258,8 +3258,6 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
 }
 ///I/O code
 
-enum file_format { LOWER_DISTANCE_MATRIX, DISTANCE_MATRIX, POINT_CLOUD, DIPHA, SPARSE, BINARY };
-
 template <typename T> T read(std::istream& s) {
     T result;
     s.read(reinterpret_cast<char*>(&result), sizeof(T));
@@ -3297,107 +3295,8 @@ compressed_lower_distance_matrix read_point_cloud(std::istream& input_stream) {
     return compressed_lower_distance_matrix(std::move(distances));
 }
 
-//the coo format input is of a lower triangular matrix
-sparse_distance_matrix read_sparse_distance_matrix(std::istream& input_stream) {
-    std::vector<std::vector<index_diameter_t_struct>> neighbors;
-    index_t num_edges= 0;
-
-    std::string line;
-    while (std::getline(input_stream, line)) {
-        std::istringstream s(line);
-        size_t i, j;
-        value_t value;
-        s >> i;
-        s >> j;
-        s >> value;
-        if (i != j) {
-            neighbors.resize(std::max({neighbors.size(), i + 1, j + 1}));
-            neighbors[i].push_back({(index_t) j, value});
-            neighbors[j].push_back({(index_t) i, value});
-            ++num_edges;
-        }
-    }
-
-    struct lowerindex_lowerdiameter_index_t_struct_compare cmp_index_diameter;
-
-    for (size_t i= 0; i < neighbors.size(); ++i)
-        std::sort(neighbors[i].begin(), neighbors[i].end(), cmp_index_diameter);
-
-    return sparse_distance_matrix(std::move(neighbors), num_edges);
-}
-
-compressed_lower_distance_matrix read_lower_distance_matrix(std::istream& input_stream) {
-    std::vector<value_t> distances;
-    value_t value;
-    while (input_stream >> value) {
-        distances.push_back(value);
-        input_stream.ignore();
-    }
-
-    return compressed_lower_distance_matrix(std::move(distances));
-}
-
-compressed_lower_distance_matrix read_distance_matrix(std::istream& input_stream) {
-    std::vector<value_t> distances;
-
-    std::string line;
-    value_t value;
-    for (int i= 0; std::getline(input_stream, line); ++i) {
-        std::istringstream s(line);
-        for (int j= 0; j < i && s >> value; ++j) {
-            distances.push_back(value);
-            s.ignore();
-        }
-    }
-
-    return compressed_lower_distance_matrix(std::move(distances));
-}
-
-compressed_lower_distance_matrix read_dipha(std::istream& input_stream) {
-    if (read<int64_t>(input_stream) != 8067171840) {
-        std::cerr << "input is not a Dipha file (magic number: 8067171840)" << std::endl;
-        exit(-1);
-    }
-
-    if (read<int64_t>(input_stream) != 7) {
-        std::cerr << "input is not a Dipha distance matrix (file type: 7)" << std::endl;
-        exit(-1);
-    }
-
-    index_t n= read<int64_t>(input_stream);
-
-    std::vector<value_t> distances;
-
-    for (int i= 0; i < n; ++i)
-        for (int j= 0; j < n; ++j)
-            if (i > j)
-                distances.push_back(read<double>(input_stream));
-            else
-                read<double>(input_stream);
-
-    return compressed_lower_distance_matrix(std::move(distances));
-}
-
-compressed_lower_distance_matrix read_binary(std::istream& input_stream) {
-    std::vector<value_t> distances;
-    while (!input_stream.eof()) distances.push_back(read<value_t>(input_stream));
-    return compressed_lower_distance_matrix(std::move(distances));
-}
-
-compressed_lower_distance_matrix read_file(std::istream& input_stream, file_format format) {
-    switch (format) {
-        case LOWER_DISTANCE_MATRIX:
-            return read_lower_distance_matrix(input_stream);
-        case DISTANCE_MATRIX:
-            return read_distance_matrix(input_stream);
-        case POINT_CLOUD:
-            return read_point_cloud(input_stream);
-        case DIPHA:
-            return read_dipha(input_stream);
-        default:
-            return read_binary(input_stream);
-    }
-    std::cerr<<"unsupported input file format"<<std::endl;
+compressed_lower_distance_matrix read_file(std::istream& input_stream) {
+    return read_point_cloud(input_stream);
 }
 
 void print_usage_and_exit(int exit_code) {
@@ -3441,8 +3340,6 @@ int main(int argc, char** argv) {
     sw.start();
     const char* filename= nullptr;
 
-    file_format format= DISTANCE_MATRIX;
-
     index_t dim_max= 1;
     value_t threshold= std::numeric_limits<value_t>::max();
 
@@ -3469,23 +3366,8 @@ int main(int argc, char** argv) {
             size_t next_pos;
             ratio= std::stof(parameter, &next_pos);
             if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--format") {
-            std::string parameter= std::string(argv[++i]);
-            if (parameter == "lower-distance")
-                format= LOWER_DISTANCE_MATRIX;
-            else if (parameter == "distance")
-                format= DISTANCE_MATRIX;
-            else if (parameter == "point-cloud")
-                format= POINT_CLOUD;
-            else if (parameter == "dipha")
-                format= DIPHA;
-            else if (parameter == "sparse")
-                format= SPARSE;
-            else if (parameter == "binary")
-                format= BINARY;
-            else
-                print_usage_and_exit(-1);
-        } else if(arg=="--sparse") {
+        }
+        else if(arg=="--sparse") {
             use_sparse= true;
         }else {
             if (filename) { print_usage_and_exit(-1); }
@@ -3503,28 +3385,12 @@ int main(int argc, char** argv) {
         std::cerr << "couldn't open file " << filename << std::endl;
         exit(-1);
     }
-    if (format == SPARSE) {
-        Stopwatch IOsw;
-        IOsw.start();
-        sparse_distance_matrix dist =
-                read_sparse_distance_matrix(filename ? file_stream : std::cin);
-        IOsw.stop();
-#ifdef PROFILING
-        std::cerr<<IOsw.ms()/1000.0<<"s time to load sparse distance matrix (I/O)"<<std::endl;
-#endif
-        assert(dist.num_entries%2==0);
-#ifdef COUNTING
-        std::cout << "sparse distance matrix with " << dist.size() << " points and "
-                  << dist.num_entries/2 << "/" << (dist.size() * (dist.size() - 1)) / 2 << " entries"
-                  << std::endl;
-#endif
-        ripser<sparse_distance_matrix>(std::move(dist), dim_max, threshold, ratio)
-                .compute_barcodes();
-    }else {
+
+    {
 
         Stopwatch IOsw;
         IOsw.start();
-        compressed_lower_distance_matrix dist= read_file(filename ? file_stream : std::cin, format);
+        compressed_lower_distance_matrix dist= read_file(filename ? file_stream : std::cin);
         IOsw.stop();
 #ifdef PROFILING
         std::cerr<<IOsw.ms()/1000.0<<"s time to load distance matrix (I/O)"<<std::endl;
