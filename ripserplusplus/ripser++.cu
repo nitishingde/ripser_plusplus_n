@@ -241,18 +241,6 @@ public:
     }
 };
 
-typedef std::pair<value_t, index_t> diameter_index_t;
-value_t get_diameter(const diameter_index_t& i) { return i.first; }
-index_t get_index(const diameter_index_t& i) { return i.second; }
-
-template <typename Entry> struct greater_diameter_or_smaller_index {
-    bool operator()(const Entry& a, const Entry& b) {
-        return (get_diameter(a) > get_diameter(b)) ||
-               ((get_diameter(a) == get_diameter(b)) && (get_index(a) < get_index(b)));
-    }
-};
-
-
 struct CSR_distance_matrix{
     index_t capacity;
     value_t* entries;
@@ -589,53 +577,6 @@ __global__ void gpu_insert_pivots_kernel(struct index_t_pair_struct* d_pivot_arr
         }
     }
 }
-__global__ void populate_edges_warpfiltering(struct diameter_index_t_struct* d_columns_to_reduce, value_t threshold, value_t* d_distance_matrix, index_t max_num_simplices, index_t num_points, binomial_coeff_table* d_binomial_coeff, index_t* d_num_columns_to_reduce){
-    index_t tid= (index_t)threadIdx.x+(index_t)blockIdx.x*(index_t)blockDim.x;
-    index_t stride= (index_t)blockDim.x*(index_t)gridDim.x;
-
-    __shared__ index_t shared_vertices[256][3];//eliminate bank conflicts (that's what the 3 is for)
-    for(; tid<max_num_simplices; tid+= stride) {
-        index_t offset= 0;
-        index_t v= num_points - 1;
-        index_t idx= tid;
-
-        for (index_t k= 2; k > 0; --k) {
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
-                index_t count= v;
-                while (count > 0) {
-                    index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
-                        v-= step + 1;
-                        count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
-                }
-            }
-
-            shared_vertices[threadIdx.x][offset++]= v;
-
-            idx -= (*d_binomial_coeff)(v, k);
-        }
-
-        //shared_vertices is always sorted in decreasing order
-        value_t diam= d_distance_matrix[LOWER_DISTANCE_INDEX(shared_vertices[threadIdx.x][0], shared_vertices[threadIdx.x][1], num_points)];
-#define FULL_MASK 0xFFFFFFFF
-        int lane_id= threadIdx.x % 32;
-        int keep_tid= diam<=threshold;
-        int mask= __ballot_sync(FULL_MASK, keep_tid);
-        int leader= __ffs(mask) - 1;
-        int base;
-        if (lane_id == leader)
-            base= atomicAdd((unsigned long long int *)d_num_columns_to_reduce, __popc(mask));
-        base= __shfl_sync(mask, base, leader);
-        int pos= base + __popc(mask & ((1 << lane_id) - 1));
-
-        if(keep_tid){
-            d_columns_to_reduce[pos].diameter= diam;
-            d_columns_to_reduce[pos].index= tid;
-        }
-    }
-}
 
 template <typename T> __global__ void populate_edges(T* d_flagarray, struct diameter_index_t_struct* d_columns_to_reduce, value_t threshold, value_t* d_distance_matrix, index_t max_num_simplices, index_t num_points, binomial_coeff_table* d_binomial_coeff){
     index_t tid= (index_t)threadIdx.x+(index_t)blockIdx.x*(index_t)blockDim.x;
@@ -675,60 +616,6 @@ template <typename T> __global__ void populate_edges(T* d_flagarray, struct diam
             d_columns_to_reduce[tid].diameter= MAX_FLOAT;//the sorting is in boundary matrix filtration order
             d_columns_to_reduce[tid].index= MIN_INT64;
             d_flagarray[tid]= 0;
-        }
-    }
-}
-
-__global__ void populate_columns_to_reduce_warpfiltering(struct diameter_index_t_struct* d_columns_to_reduce, index_t* d_num_columns_to_reduce, index_t* d_pivot_column_index, value_t* d_distance_matrix, index_t num_points, index_t max_num_simplices, index_t dim, value_t threshold, binomial_coeff_table* d_binomial_coeff) {
-    index_t tid= (index_t)threadIdx.x + (index_t)blockIdx.x * (index_t)blockDim.x;
-    index_t stride= (index_t)blockDim.x * (index_t)gridDim.x;
-
-    extern __shared__ index_t shared_vertices[];//a 256x(dim+1) matrix; shared_vertices[threadIdx.x*(dim+1)+j]=the jth vertex for threadIdx.x thread in the thread block
-    for (; tid < max_num_simplices; tid+= stride) {
-        index_t offset= 0;
-        index_t v= num_points - 1;
-        index_t idx= tid;
-
-        for (index_t k= dim + 1; k > 0; --k) {
-
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
-                index_t count= v;
-                while (count > 0) {
-                    index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
-                        v-= step + 1;
-                        count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
-                }
-            }
-
-            shared_vertices[threadIdx.x * (dim + 1) + offset++]= v;
-
-            idx-= (*d_binomial_coeff)(v, k);
-        }
-
-        value_t diam= -MAX_FLOAT;
-        for (index_t j= 0; j <= dim; ++j) {
-            for (index_t i= 0; i < j; ++i) {
-                diam= hd_max(diam, d_distance_matrix[LOWER_DISTANCE_INDEX(shared_vertices[threadIdx.x * (dim + 1) + i], shared_vertices[threadIdx.x *(dim + 1) + j], num_points)]);
-            }
-        }
-
-#define FULL_MASK 0xFFFFFFFF
-        int lane_id= threadIdx.x % 32;
-        int keep_tid= d_pivot_column_index[tid] == -1 && diam<=threshold;
-        int mask= __ballot_sync(FULL_MASK, keep_tid);
-        int leader= __ffs(mask) - 1;
-        int base;
-        if (lane_id == leader)
-            base= atomicAdd((unsigned long long int *)d_num_columns_to_reduce, __popc(mask));
-        base= __shfl_sync(mask, base, leader);
-        int pos= base + __popc(mask & ((1 << lane_id) - 1));
-
-        if(keep_tid){
-            d_columns_to_reduce[pos].diameter= diam;
-            d_columns_to_reduce[pos].index= tid;
         }
     }
 }
@@ -775,6 +662,7 @@ __global__ void populate_sparse_edges_prefixsum(struct diameter_index_t_struct* 
         }
     }
 }
+
 __global__ void populate_sparse_simplices_warpfiltering(struct diameter_index_t_struct* d_simplices, index_t* d_num_simplices, struct diameter_index_t_struct* d_columns_to_reduce, index_t* d_num_columns_to_reduce, CSR_distance_matrix* d_CSR_distance_matrix, index_t num_points, index_t dim, value_t threshold, binomial_coeff_table* d_binomial_coeff){
     index_t tid= (index_t)threadIdx.x + (index_t)blockIdx.x * (index_t)blockDim.x;
     index_t stride= (index_t)blockDim.x * (index_t)gridDim.x;
@@ -927,99 +815,6 @@ __global__ void populate_sparse_simplices_warpfiltering(struct diameter_index_t_
 }
 
 //the hope is that this is concurrency-bug free, however this is very bad for sparse graph performance
-__global__ void populate_sparse_simplices_pairedfiltering(struct diameter_index_t_struct* d_simplices, index_t* d_num_simplices, struct diameter_index_t_struct* d_columns_to_reduce, index_t* d_num_columns_to_reduce, CSR_distance_matrix* d_CSR_distance_matrix, index_t num_points, index_t dim, value_t threshold, binomial_coeff_table* d_binomial_coeff){
-    //a thread per (simplex , point) pair
-    //if the point is a "neighbor" of the simplex, then include that cofacet in d_columns_to_reduce (a filtering of d_simplices),
-
-    index_t tid= (index_t)threadIdx.x + (index_t)blockIdx.x * (index_t)blockDim.x;
-    index_t stride= (index_t)blockDim.x * (index_t)gridDim.x;
-
-    dim--;
-    extern __shared__ index_t shared_vertices[];//a 256x(dim+1) matrix; shared_vertices[threadIdx.x*(dim+1)+j]=the jth vertex for threadIdx.x thread in the thread block
-    for (; tid < *d_num_simplices*num_points; tid+= stride) {
-        index_t vertex= tid%num_points;
-        index_t simplex= tid/num_points;
-
-        index_t offset= 0;
-        index_t v= num_points-1;
-        index_t idx= d_simplices[simplex].index;
-
-        for (index_t k= dim +1; k > 0; --k) {
-
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
-                index_t count= v;
-                while (count > 0) {
-                    index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
-                        v-= step + 1;
-                        count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
-                }
-            }
-            shared_vertices[threadIdx.x * (dim + 1) + offset++]= v;
-            idx-= (*d_binomial_coeff)(v, k);
-        }
-
-        index_t* offsets= d_CSR_distance_matrix->offsets;
-        index_t* col_indices= d_CSR_distance_matrix->col_indices;
-        value_t* entries= d_CSR_distance_matrix->entries;
-
-        bool alledges_exist= true;
-
-        index_t start_idx= offsets[vertex];
-        index_t end_idx= offsets[vertex+1];
-        value_t cofacet_diameter= d_simplices[simplex].diameter;
-        for(index_t vidx= 0; vidx<dim+1; vidx++) {
-            index_t v= shared_vertices[threadIdx.x * (dim + 1) + vidx];
-
-            index_t left= start_idx;
-            index_t right= end_idx-1;
-
-            //binary search for v in row vertex with start and end start_idx and end_idx respectively
-            while(left<=right){
-                index_t mid= left+(right-left)/2;
-                if(col_indices[mid]==v){
-                    cofacet_diameter= hd_max(cofacet_diameter, entries[mid]);
-                    goto next_vertex;
-                }
-                if(col_indices[mid]<v){
-                    left= mid+1;
-                }else{
-                    right= mid-1;
-                }
-            }
-            alledges_exist= false;
-            break;
-            next_vertex:;
-        }
-        if(!alledges_exist){
-            cofacet_diameter= threshold+1;
-        }
-
-        if(shared_vertices[threadIdx.x * (dim + 1)]>vertex){
-            alledges_exist= false;//we only include this vertex "vertex" if "vertex" has a  strictly larger value than all other vertices in simplex
-        }
-
-        index_t cofacet_index= (*d_binomial_coeff)(vertex, dim+2) + d_simplices[simplex].index;
-
-#define FULL_MASK 0xFFFFFFFF
-        int lane_id= threadIdx.x % 32;
-        int keep_cofacet= cofacet_diameter<=threshold && alledges_exist;
-        int mask= __ballot_sync(FULL_MASK, keep_cofacet);
-        int leader= __ffs(mask) - 1;
-        int base;
-        if (lane_id == leader)
-            base= atomicAdd((unsigned long long int *)d_num_columns_to_reduce, __popc(mask));
-        base= __shfl_sync(mask, base, leader);
-        int pos= base + __popc(mask & ((1 << lane_id) - 1));
-
-        if(keep_cofacet){
-            d_columns_to_reduce[pos].diameter= cofacet_diameter;
-            d_columns_to_reduce[pos].index= cofacet_index;
-        }
-    }
-}
 
 template <typename T>__global__ void populate_columns_to_reduce(T* d_flagarray, struct diameter_index_t_struct* d_columns_to_reduce, index_t* d_pivot_column_index,
                                                                 value_t* d_distance_matrix, index_t num_points, index_t max_num_simplices, index_t dim, value_t threshold, binomial_coeff_table* d_binomial_coeff) {
@@ -3475,33 +3270,6 @@ template <typename T> T read(std::istream& s) {
     s.read(reinterpret_cast<char*>(&result), sizeof(T));
     return result; // on little endian: boost::endian::little_to_native(result);
 }
-compressed_lower_distance_matrix read_point_cloud_python(value_t* matrix, int num_rows, int num_columns){
-    std::vector<std::vector<value_t>> points;
-    for(int i= 0; i < num_rows; i++) {
-        std::vector <value_t> point;
-        for (int j= 0; j < num_columns; j++) {
-            point.push_back(matrix[i * num_columns + j]);
-        }
-        if (!point.empty()) {
-            points.push_back(point);
-        }
-        assert(point.size() == points.front().size());
-    }
-    //only l2 distance implemented so far
-    euclidean_distance_matrix eucl_dist(std::move(points));
-
-    index_t n= eucl_dist.size();
-#ifdef COUNTING
-    std::cout << "point cloud with " << n << " points in dimension "
-                  << eucl_dist.points.front().size() << std::endl;
-#endif
-    std::vector<value_t> distances;
-
-    for (int i= 0; i < n; ++i)
-        for (int j= 0; j < i; ++j) distances.push_back(eucl_dist(i, j));
-
-    return compressed_lower_distance_matrix(std::move(distances));
-}
 
 compressed_lower_distance_matrix read_point_cloud(std::istream& input_stream) {
     std::vector<std::vector<value_t>> points;
@@ -3562,37 +3330,6 @@ sparse_distance_matrix read_sparse_distance_matrix(std::istream& input_stream) {
 
     return sparse_distance_matrix(std::move(neighbors), num_edges);
 }
-sparse_distance_matrix read_sparse_distance_matrix_python(value_t* matrix, int matrix_length){
-    std::vector<std::vector<index_diameter_t_struct>> neighbors;
-    index_t num_edges= 0;
-
-    for(index_t k = 0; k < matrix_length; k+=3){
-        size_t i, j;
-        value_t value;
-        i = matrix[k];
-        j = matrix[k+1];
-        value = matrix[k+2];
-        if (i != j) {
-            neighbors.resize(std::max({neighbors.size(), i + 1, j + 1}));
-            neighbors[i].push_back({(index_t) j, value});
-            neighbors[j].push_back({(index_t) i, value});
-            ++num_edges;
-        }
-    }
-
-    struct lowerindex_lowerdiameter_index_t_struct_compare cmp_index_diameter;
-
-    for (size_t i= 0; i < neighbors.size(); ++i)
-        std::sort(neighbors[i].begin(), neighbors[i].end(), cmp_index_diameter);
-
-    return sparse_distance_matrix(std::move(neighbors), num_edges);
-}
-compressed_lower_distance_matrix read_lower_distance_matrix_python(value_t* matrix, int matrix_length) {
-
-    std::vector<value_t> distances(matrix, matrix + matrix_length);
-
-    return compressed_lower_distance_matrix(std::move(distances));
-}
 
 compressed_lower_distance_matrix read_lower_distance_matrix(std::istream& input_stream) {
     std::vector<value_t> distances;
@@ -3601,13 +3338,6 @@ compressed_lower_distance_matrix read_lower_distance_matrix(std::istream& input_
         distances.push_back(value);
         input_stream.ignore();
     }
-
-    return compressed_lower_distance_matrix(std::move(distances));
-}
-
-compressed_lower_distance_matrix read_distance_matrix_python(value_t* matrix, int matrix_length) {
-
-    std::vector<value_t> distances(matrix, matrix + matrix_length);
 
     return compressed_lower_distance_matrix(std::move(distances));
 }
@@ -3659,19 +3389,6 @@ compressed_lower_distance_matrix read_binary(std::istream& input_stream) {
     return compressed_lower_distance_matrix(std::move(distances));
 }
 
-compressed_lower_distance_matrix read_matrix_python(value_t* matrix, int num_entries, int num_rows, int num_columns, file_format format) {
-    switch (format) {
-        case LOWER_DISTANCE_MATRIX:
-            return read_lower_distance_matrix_python(matrix, num_entries);
-        case DISTANCE_MATRIX://assume that the distance matrix has been changed into lower_distance matrix format
-            return read_distance_matrix_python(matrix, num_entries);
-        case POINT_CLOUD:
-            return read_point_cloud_python(matrix, num_rows, num_columns);
-    }
-    std::cerr<<"unsupported input file format for python interface"<<std::endl;
-    exit(-1);
-}
-
 compressed_lower_distance_matrix read_file(std::istream& input_stream, file_format format) {
     switch (format) {
         case LOWER_DISTANCE_MATRIX:
@@ -3715,336 +3432,6 @@ void print_usage_and_exit(int exit_code) {
             << std::endl;
 
     exit(exit_code);
-}
-
-extern "C" ripser_plusplus_result run_main_filename(int argc,  char** argv, const char* filename) {
-
-    Stopwatch sw;
-
-
-#ifdef PROFILING
-    cudaDeviceProp deviceProp;
-    size_t freeMem_start, freeMem_end, totalMemory;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    cudaMemGetInfo(&freeMem_start,&totalMemory);
-#endif
-    sw.start();
-
-    file_format format= DISTANCE_MATRIX;
-
-    index_t dim_max= 1;
-    value_t threshold= std::numeric_limits<value_t>::max();
-
-    float ratio= 1;
-
-    bool use_sparse= false;
-
-
-    for (index_t i= 0; i < argc; i++) {
-        const std::string arg(argv[i]);
-        if (arg == "--help") {
-            print_usage_and_exit(0);
-        } else if (arg == "--dim") {
-            std::string parameter= std::string(argv[++i]);
-            size_t next_pos;
-            dim_max= std::stol(parameter, &next_pos);
-            if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--threshold") {
-            std::string parameter= std::string(argv[++i]);
-            size_t next_pos;
-            threshold= std::stof(parameter, &next_pos);
-            if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--ratio") {
-            std::string parameter= std::string(argv[++i]);
-            size_t next_pos;
-            ratio= std::stof(parameter, &next_pos);
-            if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--format") {
-            std::string parameter= std::string(argv[++i]);
-            if (parameter == "lower-distance")
-                format= LOWER_DISTANCE_MATRIX;
-            else if (parameter == "distance")
-                format= DISTANCE_MATRIX;
-            else if (parameter == "point-cloud")
-                format= POINT_CLOUD;
-            else if (parameter == "dipha")
-                format= DIPHA;
-            else if (parameter == "sparse")
-                format= SPARSE;
-            else if (parameter == "binary")
-                format= BINARY;
-            else
-                print_usage_and_exit(-1);
-        } else if(arg=="--sparse") {
-            use_sparse= true;
-        }
-    }
-
-    list_of_barcodes = std::vector<std::vector<birth_death_coordinate>>();
-    for(index_t i = 0; i <= dim_max; i++){
-        list_of_barcodes.push_back(std::vector<birth_death_coordinate>());
-    }
-
-    std::ifstream file_stream(filename);
-    if (filename && file_stream.fail()) {
-        std::cerr << "couldn't open file " << filename << std::endl;
-        exit(-1);
-    }
-    if (format == SPARSE) {
-        Stopwatch IOsw;
-        IOsw.start();
-        sparse_distance_matrix dist =
-                read_sparse_distance_matrix(filename ? file_stream : std::cin);
-        IOsw.stop();
-#ifdef PROFILING
-        std::cerr<<IOsw.ms()/1000.0<<"s time to load sparse distance matrix (I/O)"<<std::endl;
-#endif
-        assert(dist.num_entries%2==0);
-#ifdef COUNTING
-        std::cout << "sparse distance matrix with " << dist.size() << " points and "
-                  << dist.num_entries/2 << "/" << (dist.size() * (dist.size() - 1)) / 2 << " entries"
-                  << std::endl;
-#endif
-        ripser<sparse_distance_matrix>(std::move(dist), dim_max, threshold, ratio)
-                .compute_barcodes();
-    }else {
-
-        Stopwatch IOsw;
-        IOsw.start();
-        compressed_lower_distance_matrix dist= read_file(filename ? file_stream : std::cin, format);
-        IOsw.stop();
-#ifdef PROFILING
-        std::cerr<<IOsw.ms()/1000.0<<"s time to load distance matrix (I/O)"<<std::endl;
-#endif
-        value_t min= std::numeric_limits<value_t>::infinity(),
-                max= -std::numeric_limits<value_t>::infinity(), max_finite= max;
-        int num_edges= 0;
-
-        value_t enclosing_radius= std::numeric_limits<value_t>::infinity();
-        for (index_t i= 0; i < dist.size(); ++i) {
-            value_t r_i= -std::numeric_limits<value_t>::infinity();
-            for (index_t j= 0; j < dist.size(); ++j) r_i= std::max(r_i, dist(i, j));
-            enclosing_radius= std::min(enclosing_radius, r_i);
-        }
-
-        if (threshold == std::numeric_limits<value_t>::max()) threshold= enclosing_radius;
-
-        for (auto d : dist.distances) {
-            min= std::min(min, d);
-            max= std::max(max, d);
-            max_finite= d != std::numeric_limits<value_t>::infinity() ? std::max(max, d) : max_finite;
-            if (d <= threshold) ++num_edges;
-        }
-#ifdef COUNTING
-        std::cout << "value range: [" << min << "," << max_finite << "]" << std::endl;
-#endif
-
-
-        if (use_sparse) {
-#ifdef COUNTING
-            std::cout << "sparse distance matrix with " << dist.size() << " points and "
-                      << num_edges << "/" << (dist.size() * (dist.size() - 1)) / 2 << " entries"
-                      << std::endl;
-#endif
-            ripser<sparse_distance_matrix>(sparse_distance_matrix(std::move(dist), threshold),
-                                           dim_max, threshold, ratio)
-                    .compute_barcodes();
-        } else {
-#ifdef COUNTING
-            std::cout << "distance matrix with " << dist.size() << " points" << std::endl;
-#endif
-            ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
-        }
-    }
-    sw.stop();
-#ifdef INDICATE_PROGRESS
-    std::cerr<<clear_line<<std::flush;
-#endif
-#ifdef PROFILING
-    std::cerr<<"total time: "<<sw.ms()/1000.0<<"s"<<std::endl;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    cudaMemGetInfo(&freeMem_end,&totalMemory);
-
-    std::cerr<<"total GPU memory used: "<<(freeMem_start-freeMem_end)/1000.0/1000.0/1000.0<<"GB"<<std::endl;
-#endif
-
-    set_of_barcodes* collected_barcodes = (set_of_barcodes*)malloc(sizeof(set_of_barcodes) * list_of_barcodes.size());
-    for(index_t i = 0; i < list_of_barcodes.size();i++){
-        birth_death_coordinate* barcode_array = (birth_death_coordinate*)malloc(sizeof(birth_death_coordinate) * list_of_barcodes[i].size());
-
-        index_t j;
-        for(j = 0; j < list_of_barcodes[i].size(); j++){
-            barcode_array[j] = list_of_barcodes[i][j];
-        }
-        collected_barcodes[i] = {j,barcode_array};
-    }
-
-    res = {(int)(dim_max + 1),collected_barcodes};
-
-    return res;
-}
-
-extern "C" ripser_plusplus_result run_main(int argc, char** argv, value_t* matrix, int num_entries, int num_rows, int num_columns) {
-
-    Stopwatch sw;
-#ifdef PROFILING
-    cudaDeviceProp deviceProp;
-    size_t freeMem_start, freeMem_end, totalMemory;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    cudaMemGetInfo(&freeMem_start,&totalMemory);
-#endif
-    sw.start();
-    const char* filename= nullptr;
-
-    file_format format= DISTANCE_MATRIX;
-
-    index_t dim_max= 1;
-    value_t threshold= std::numeric_limits<value_t>::max();
-
-    float ratio= 1;
-
-    bool use_sparse= false;
-
-    for (index_t i= 0; i < argc; i++) {
-        const std::string arg(argv[i]);
-        if (arg == "--help") {
-            print_usage_and_exit(0);
-        } else if (arg == "--dim") {
-            std::string parameter= std::string(argv[++i]);
-            size_t next_pos;
-            dim_max= std::stol(parameter, &next_pos);
-            if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--threshold") {
-            std::string parameter= std::string(argv[++i]);
-            size_t next_pos;
-            threshold= std::stof(parameter, &next_pos);
-            if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--ratio") {
-            std::string parameter= std::string(argv[++i]);
-            size_t next_pos;
-            ratio= std::stof(parameter, &next_pos);
-            if (next_pos != parameter.size()) print_usage_and_exit(-1);
-        } else if (arg == "--format") {
-            std::string parameter= std::string(argv[++i]);
-            if (parameter == "lower-distance")
-                format= LOWER_DISTANCE_MATRIX;
-            else if (parameter == "distance")
-                format= DISTANCE_MATRIX;
-            else if (parameter == "point-cloud")
-                format= POINT_CLOUD;
-            else if (parameter == "dipha")
-                format= DIPHA;
-            else if (parameter == "sparse") {
-                format= SPARSE;
-                use_sparse = true;
-            }
-            else if (parameter == "binary")
-                format= BINARY;
-            else
-                print_usage_and_exit(-1);
-        } else if(arg=="--sparse") {
-            use_sparse= true;
-        }
-    }
-
-    list_of_barcodes = std::vector<std::vector<birth_death_coordinate>>();
-    for(index_t i = 0; i <= dim_max; i++){
-        list_of_barcodes.push_back(std::vector<birth_death_coordinate>());
-    }
-
-    if (format == SPARSE) {//this branch is currently unsupported in run_main, see run_main_filename() instead
-        Stopwatch IOsw;
-        IOsw.start();
-
-
-        sparse_distance_matrix dist= read_sparse_distance_matrix_python(matrix,num_entries);
-
-        IOsw.stop();
-#ifdef PROFILING
-        std::cerr<<IOsw.ms()/1000.0<<"s time to load sparse distance matrix (I/O)"<<std::endl;
-#endif
-        assert(dist.num_entries%2==0);
-#ifdef COUNTING
-        std::cout << "sparse distance matrix with " << dist.size() << " points and "
-                  << dist.num_entries/2 << "/" << (dist.size() * (dist.size() - 1)) / 2 << " entries"
-                  << std::endl;
-#endif
-        ripser<sparse_distance_matrix>(std::move(dist), dim_max, threshold, ratio)
-                .compute_barcodes();
-    }else{
-        //Stopwatch IOsw;
-        //IOsw.start();
-        compressed_lower_distance_matrix dist= read_matrix_python(matrix, num_entries, num_rows, num_columns, format);
-        //IOsw.stop();
-
-#ifdef PROFILING
-        //std::cerr<<IOsw.ms()/1000.0<<"s time to load python matrix"<<std::endl;
-        std::cerr<<"loaded python dense user matrix"<<std::endl;
-#endif
-        value_t min= std::numeric_limits<value_t>::infinity(),
-                max= -std::numeric_limits<value_t>::infinity(), max_finite= max;
-        int num_edges= 0;
-
-        value_t enclosing_radius= std::numeric_limits<value_t>::infinity();
-        for (index_t i= 0; i < dist.size(); ++i) {
-            value_t r_i= -std::numeric_limits<value_t>::infinity();
-            for (index_t j= 0; j < dist.size(); ++j) r_i= std::max(r_i, dist(i, j));
-            enclosing_radius= std::min(enclosing_radius, r_i);
-        }
-
-        if (threshold == std::numeric_limits<value_t>::max()) threshold= enclosing_radius;
-
-        for (auto d : dist.distances) {
-            min= std::min(min, d);
-            max= std::max(max, d);
-            max_finite= d != std::numeric_limits<value_t>::infinity() ? std::max(max, d) : max_finite;
-            if (d <= threshold) ++num_edges;
-        }
-#ifdef COUNTING
-        std::cout << "value range: [" << min << "," << max_finite << "]" << std::endl;
-#endif
-        if (use_sparse) {
-#ifdef COUNTING
-            std::cout << "sparse distance matrix with " << dist.size() << " points and "
-                      << num_edges << "/" << (dist.size() * (dist.size() - 1)) / 2 << " entries"
-                      << std::endl;
-#endif
-            ripser<sparse_distance_matrix>(sparse_distance_matrix(std::move(dist), threshold),
-                                           dim_max, threshold, ratio)
-                    .compute_barcodes();
-        } else {
-#ifdef COUNTING
-            std::cout << "distance matrix with " << dist.size() << " points" << std::endl;
-#endif
-            ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
-        }
-    }
-    sw.stop();
-#ifdef INDICATE_PROGRESS
-    std::cerr<<clear_line<<std::flush;
-#endif
-#ifdef PROFILING
-    std::cerr<<"total time: "<<sw.ms()/1000.0<<"s"<<std::endl;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    cudaMemGetInfo(&freeMem_end,&totalMemory);
-
-    std::cerr<<"total GPU memory used: "<<(freeMem_start-freeMem_end)/1000.0/1000.0/1000.0<<"GB"<<std::endl;
-#endif
-
-    set_of_barcodes* collected_barcodes = (set_of_barcodes*)malloc(sizeof(set_of_barcodes) * list_of_barcodes.size());
-    for(index_t i = 0; i < list_of_barcodes.size();i++){
-        birth_death_coordinate* barcode_array = (birth_death_coordinate*)malloc(sizeof(birth_death_coordinate) * list_of_barcodes[i].size());
-
-        index_t j;
-        for(j = 0; j < list_of_barcodes[i].size(); j++){
-            barcode_array[j] = list_of_barcodes[i][j];
-        }
-        collected_barcodes[i] = {j,barcode_array};
-    }
-
-    res = {(int)(dim_max + 1),collected_barcodes};
-
-    return res;
 }
 
 int main(int argc, char** argv) {
