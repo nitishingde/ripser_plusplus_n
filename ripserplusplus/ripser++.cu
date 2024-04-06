@@ -82,14 +82,8 @@
 #include <sparsehash/dense_hash_map>
 #include <phmap_interface/phmap_interface.h>
 
-#include <omp.h>
 #include <thrust/fill.h>
 #include <thrust/device_vector.h>
-#include <thrust/scan.h>
-#include <thrust/execution_policy.h>
-#include <thrust/unique.h>
-#include <thrust/sort.h>
-#include <cuda_runtime.h>
 #ifdef CPUONLY_SPARSE_HASHMAP
 #include <sparsehash/sparse_hash_map>
 template <class Key, class T> class hash_map : public google::sparse_hash_map<Key, T> {
@@ -126,12 +120,6 @@ struct diameter_index_t_struct{
 struct index_diameter_t_struct{
     index_t index;
     value_t diameter;
-};
-
-struct lowerindex_lowerdiameter_index_t_struct_compare{
-    __host__ __device__ bool operator() (struct index_diameter_t_struct a, struct index_diameter_t_struct b){
-        return a.index!=b.index ? a.index<b.index : a.diameter<b.diameter;
-    }
 };
 
 struct greaterdiam_lowerindex_diameter_index_t_struct_compare {
@@ -250,9 +238,9 @@ struct CSR_distance_matrix{
     index_t num_edges;
     index_t num_entries;
 public:
-    CSR_distance_matrix(){}//avoid calling malloc in constructor for GPU side
+    CSR_distance_matrix() = default;//avoid calling malloc in constructor for GPU side
 
-    index_t size(){return n;}
+    index_t size() const {return n;}
     ~CSR_distance_matrix(){
         free(entries);
         free(offsets);
