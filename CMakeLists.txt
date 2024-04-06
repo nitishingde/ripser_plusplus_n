@@ -105,3 +105,11 @@ cuda_add_executable(ripser++
 )
 target_include_directories(ripser++ PUBLIC ${CMAKE_SOURCE_DIR}/ripserplusplus/include)
 target_compile_definitions(ripser++ PUBLIC PRINT_PERSISTENCE_PAIRS)
+
+cuda_add_executable(hh
+    hh.cu
+    ripserplusplus/include/phmap_interface/phmap_interface.cpp
+    ripserplusplus/include/profiling/stopwatch.h
+)
+target_include_directories(hh PUBLIC ${CMAKE_SOURCE_DIR}/ripserplusplus/include)
+target_compile_definitions(hh PUBLIC PRINT_PERSISTENCE_PAIRS)
