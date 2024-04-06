@@ -8,3 +8,6 @@ dist/
 .vscode/
 *.egg-info
 out/
+.idea/
+cmake-build-debug/
+cmake-build-release/
