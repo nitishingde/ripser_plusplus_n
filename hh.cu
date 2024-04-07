@@ -117,11 +117,6 @@ struct diameter_index_t_struct{
     index_t index;
 };
 
-struct index_diameter_t_struct{
-    index_t index;
-    value_t diameter;
-};
-
 struct greaterdiam_lowerindex_diameter_index_t_struct_compare {
     __host__ __device__ bool operator() (struct diameter_index_t_struct a, struct diameter_index_t_struct b){
         return a.diameter!=b.diameter ? a.diameter>b.diameter : a.index<b.index;
@@ -130,12 +125,6 @@ struct greaterdiam_lowerindex_diameter_index_t_struct_compare {
 struct greaterdiam_lowerindex_diameter_index_t_struct_compare_reverse {
     __host__ __device__ bool operator() (struct diameter_index_t_struct a, struct diameter_index_t_struct b){
         return a.diameter!=b.diameter ? a.diameter<b.diameter : a.index>b.index;
-    }
-};
-
-struct lowerindex_lowerdiam_diameter_index_t_struct_compare{
-    __host__ __device__ bool operator() (struct diameter_index_t_struct a, struct diameter_index_t_struct b){
-        return a.index!=b.index ? a.index<b.index : a.diameter<b.diameter;
     }
 };
 
@@ -229,25 +218,6 @@ public:
     }
 };
 
-struct CSR_distance_matrix{
-    index_t capacity;
-    value_t* entries;
-    index_t* offsets;
-    index_t* col_indices;
-    index_t n;
-    index_t num_edges;
-    index_t num_entries;
-public:
-    CSR_distance_matrix() = default;//avoid calling malloc in constructor for GPU side
-
-    index_t size() const {return n;}
-    ~CSR_distance_matrix(){
-        free(entries);
-        free(offsets);
-        free(col_indices);
-    }
-};
-
 class compressed_lower_distance_matrix {
 public:
     std::vector<value_t> distances;
@@ -281,114 +251,6 @@ public:
     }
 
     size_t size() const { return rows.size(); }
-
-};
-
-struct sparse_distance_matrix {
-    std::vector<std::vector<index_diameter_t_struct>> neighbors;
-
-    index_t num_entries;
-
-    mutable std::vector<std::vector<index_diameter_t_struct>::const_reverse_iterator> neighbor_it;
-    mutable std::vector<std::vector<index_diameter_t_struct>::const_reverse_iterator> neighbor_end;
-
-    sparse_distance_matrix(std::vector<std::vector<index_diameter_t_struct>>&& _neighbors,
-                           index_t _num_edges)
-            : neighbors(std::move(_neighbors)), num_entries(_num_edges*2) {}
-
-    template <typename DistanceMatrix>
-    sparse_distance_matrix(const DistanceMatrix& mat, const value_t threshold)
-            : neighbors(mat.size()), num_entries(0) {
-#ifdef COUNTING
-        std::cerr << "threshold: " << threshold << std::endl;
-#endif
-        for (index_t i= 0; i < size(); ++i) {
-            for (index_t j= 0; j < size(); ++j) {
-                if (i != j && mat(i, j) <= threshold) {
-                    ++num_entries;
-                    neighbors[i].push_back({j, mat(i, j)});
-                }
-            }
-        }
-    }
-    size_t size() const { return neighbors.size(); }
-
-private:
-    //this should only be called from CPU side
-    void append_sparse(CSR_distance_matrix& dist, value_t e, index_t j) {
-
-        if (dist.capacity == 0) {
-            dist.entries= (value_t *) malloc(sizeof(value_t) * size() * 10);
-            if(dist.entries==nullptr){
-                std::cerr<<"entries could not be malloced"<<std::endl;
-                exit(1);
-            }
-            dist.col_indices= (index_t *) malloc(sizeof(index_t) * size() * 10);
-            if(dist.col_indices==nullptr){
-                std::cerr<<"col_indices could not be malloced"<<std::endl;
-                exit(1);
-            }
-            dist.capacity= size() * 10;
-        }
-
-        if (dist.num_entries >= dist.capacity) {
-            dist.capacity*= 2;
-            dist.entries= (value_t *) realloc(dist.entries, sizeof(value_t) * dist.capacity);
-            if(dist.entries==nullptr){
-                std::cerr<<"col_indices could not be realloced with double memory"<<std::endl;
-                exit(1);
-            }
-            dist.col_indices= (index_t *) realloc(dist.col_indices, sizeof(index_t) * dist.capacity);
-            if(dist.col_indices==nullptr){
-                std::cerr<<"col_indices could not be realloced with double memory"<<std::endl;
-                exit(1);
-            }
-        }
-        dist.entries[dist.num_entries]= e;
-        dist.col_indices[dist.num_entries++]= j;
-    }
-
-    //this should only be called on CPU side
-    void update_offsets(CSR_distance_matrix& dist, index_t row_index, index_t offset_increment){
-        if(row_index==0){
-            dist.offsets[0]= 0;
-        }
-        dist.offsets[row_index+1]= dist.offsets[row_index]+offset_increment;
-    }
-
-public:
-
-    CSR_distance_matrix toCSR(){
-        CSR_distance_matrix dist;
-        dist.n= size();
-        dist.num_entries= 0;
-        dist.capacity= num_entries;//this sets the matrix to exactly num_entries memory allocation
-        dist.offsets= (index_t*) malloc(sizeof(index_t)*(size()+1));
-        if(dist.offsets==nullptr){
-            std::cerr<<"malloc for offsets failed"<<std::endl;
-            exit(1);
-        }
-        dist.col_indices= (index_t*) malloc(sizeof(index_t)*dist.capacity);
-        if(dist.col_indices==nullptr){
-            std::cerr<<"malloc for col_indices failed"<<std::endl;
-            exit(1);
-        }
-        dist.entries= (value_t*) malloc(sizeof(value_t)*dist.capacity);
-        if(dist.entries==nullptr){
-            std::cerr<<"malloc for entries failed"<<std::endl;
-            exit(1);
-        }
-        for(index_t i= 0; i<size(); i++){
-            index_t nnz_inrow= 0;
-            for(index_t j=0; j<neighbors[i].size(); j++){
-                append_sparse(dist, neighbors[i][j].diameter, neighbors[i][j].index);
-                nnz_inrow++;
-            }
-            update_offsets(dist, i, nnz_inrow);
-        }
-        dist.num_edges= num_entries/2;
-        return dist;
-    }
 
 };
 
@@ -485,12 +347,6 @@ public:
     }
 
     void append_column() { bounds.push_back(entries.size()); }
-
-    void push_back(const ValueType e) {
-        assert(0 < size());
-        entries.push_back(e);
-        ++bounds.back();
-    }
 };
 
 template <typename ValueType> class compressed_sparse_submatrix {
@@ -607,201 +463,6 @@ template <typename T> __global__ void populate_edges(T* d_flagarray, struct diam
         }
     }
 }
-
-__global__ void populate_sparse_edges_preparingcount(int* d_num, CSR_distance_matrix* d_CSR_distance_matrix, index_t num_points, index_t* d_num_simplices){
-    index_t tid= (index_t)threadIdx.x+(index_t)blockIdx.x*(index_t)blockDim.x;
-    index_t stride= (index_t)blockDim.x * (index_t)gridDim.x;
-    index_t* offsets= d_CSR_distance_matrix->offsets;
-    index_t* col_indices= d_CSR_distance_matrix->col_indices;
-
-    for(; tid<num_points; tid+= stride){
-        int _num=0;
-        index_t col_start= offsets[tid];
-        index_t col_end= offsets[tid+1];
-        for(index_t entry_idx= col_start; entry_idx<col_end; entry_idx++){
-            index_t neighbor_of_tid= col_indices[entry_idx];
-            if(tid>neighbor_of_tid)_num++;
-        }
-        d_num[tid]= _num;
-    }
-}
-
-__global__ void populate_sparse_edges_prefixsum(struct diameter_index_t_struct* d_simplices, int* d_num, CSR_distance_matrix* d_CSR_distance_matrix, binomial_coeff_table* d_binomial_coeff, index_t num_points, index_t* d_num_simplices){
-    index_t tid= (index_t)threadIdx.x+(index_t)blockIdx.x*(index_t)blockDim.x;
-    index_t stride= (index_t)blockDim.x * (index_t)gridDim.x;
-
-    value_t* entries= d_CSR_distance_matrix->entries;
-    index_t* offsets= d_CSR_distance_matrix->offsets;
-    index_t* col_indices= d_CSR_distance_matrix->col_indices;
-
-    for(; tid<num_points; tid+= stride){
-        int _pos=0;
-        index_t col_start= offsets[tid];
-        index_t col_end= offsets[tid+1];
-        for(index_t entry_idx= col_start; entry_idx<col_end; entry_idx++){
-            index_t neighbor_of_tid= col_indices[entry_idx];
-            if(tid>neighbor_of_tid){
-                d_simplices[d_num[tid]+_pos].diameter= entries[entry_idx];
-                d_simplices[d_num[tid]+_pos++].index= (*d_binomial_coeff)(tid,2) + neighbor_of_tid;
-            }
-        }
-        if(tid==num_points-1){
-            *d_num_simplices= d_num[tid]+_pos;
-        }
-    }
-}
-
-__global__ void populate_sparse_simplices_warpfiltering(struct diameter_index_t_struct* d_simplices, index_t* d_num_simplices, struct diameter_index_t_struct* d_columns_to_reduce, index_t* d_num_columns_to_reduce, CSR_distance_matrix* d_CSR_distance_matrix, index_t num_points, index_t dim, value_t threshold, binomial_coeff_table* d_binomial_coeff){
-    index_t tid= (index_t)threadIdx.x + (index_t)blockIdx.x * (index_t)blockDim.x;
-    index_t stride= (index_t)blockDim.x * (index_t)gridDim.x;
-
-    dim--;//keep dim in terms of the dimension of the simplices
-    extern __shared__ index_t shared_vertices[];//a 256x(dim+1) matrix; shared_vertices[threadIdx.x*(dim+1)+j]=the jth vertex for threadIdx.x thread in the thread block
-
-    for (; tid < *d_num_simplices; tid += stride) {
-        index_t offset= 0;
-        index_t v= num_points - 1;
-        index_t idx= d_simplices[tid].index;
-
-        for (index_t k= dim + 1; k > 0; --k) {
-
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
-                index_t count= v;
-                while (count > 0) {
-                    index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
-                        v-= step + 1;
-                        count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
-                }
-            }
-
-            shared_vertices[threadIdx.x * (dim + 1) + offset++]= v;
-
-            idx-= (*d_binomial_coeff)(v, k);
-        }
-
-        index_t k= dim+1;
-
-        bool next_cofacet= false;
-        value_t nbr_diameter= -1;
-        index_t nbr_index= -1;
-        index_t idx_below= d_simplices[tid].index;
-        index_t idx_above= 0;
-
-
-        index_t base_vertex_index= shared_vertices[threadIdx.x * (dim + 1)]; //shared_vertices[threadIdx.x][0];
-        //this gives the entry indices of the right and left ends of the row indexed by base_vertex_index in the CSR distance matrix
-        index_t base_vertex_nbr_itr= d_CSR_distance_matrix->offsets[base_vertex_index+1]-1;
-        index_t base_vertex_nbr_end= d_CSR_distance_matrix->offsets[base_vertex_index];
-
-        for(; base_vertex_nbr_itr>=base_vertex_nbr_end; base_vertex_nbr_itr--){
-            //nbr is the neighboring vertex to the simplex corresponding to this tid
-            nbr_diameter= d_CSR_distance_matrix->entries[base_vertex_nbr_itr];
-            nbr_index= d_CSR_distance_matrix->col_indices[base_vertex_nbr_itr];
-
-            //there are dim other vertices along with the base_vertex
-            for(index_t other_vertex_idx=1; other_vertex_idx<dim+1; other_vertex_idx++){
-
-                index_t other_vertex= shared_vertices[threadIdx.x * (dim + 1) + other_vertex_idx];
-                index_t other_vertex_nbr_itr= d_CSR_distance_matrix->offsets[other_vertex+1]-1;
-                index_t other_vertex_nbr_end= d_CSR_distance_matrix->offsets[other_vertex];
-                index_t other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                while(other_vertex_nbr_index>nbr_index){
-                    if(other_vertex_nbr_itr==other_vertex_nbr_end) {
-                        next_cofacet= false;
-                        goto end_search;
-                    }
-                    other_vertex_nbr_itr--;
-                    other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                }
-                if(other_vertex_nbr_index!=nbr_index){
-                    goto try_next_vertex;
-                }else{
-                    nbr_diameter= hd_max(nbr_diameter, d_CSR_distance_matrix->entries[other_vertex_nbr_itr]);
-                }
-            }
-
-            //this simply says we only consider nbr_index (the appending point) to be of larger index than the largest of shared_vertices (the vertices of the current simplex)
-            if(shared_vertices[threadIdx.x * (dim + 1)]>nbr_index){
-                next_cofacet= false;
-                goto end_search;
-            }
-            next_cofacet= true;
-            goto end_search;
-            try_next_vertex:;
-        }
-        next_cofacet= false;
-        end_search:;
-
-
-        //end of search for next cofacet (sparse version)
-        while(next_cofacet){
-            base_vertex_nbr_itr--;
-            value_t cofacet_diameter= hd_max(d_simplices[tid].diameter, nbr_diameter);
-            index_t cofacet_index= idx_above + (*d_binomial_coeff)(nbr_index, k + 1) + idx_below;
-
-#define FULL_MASK 0xFFFFFFFF
-            int lane_id= threadIdx.x % 32;
-            int keep_cofacet= cofacet_diameter<=threshold;
-            int mask= __ballot_sync(FULL_MASK, keep_cofacet);
-            int leader= __ffs(mask) - 1;
-            int base;
-            if (lane_id == leader)
-                base= atomicAdd((unsigned long long int *)d_num_columns_to_reduce, __popc(mask));
-            base= __shfl_sync(mask, base, leader);
-            int pos= base + __popc(mask & ((1 << lane_id) - 1));
-
-            if(keep_cofacet){
-                d_columns_to_reduce[pos].diameter= cofacet_diameter;
-                d_columns_to_reduce[pos].index= cofacet_index;
-            }
-
-//isn't a way to represent the hash table on gpu in a cheap way, so we ignore the hash table for assembling columns to reduce
-
-            next_cofacet= false;
-            for(; base_vertex_nbr_itr>=base_vertex_nbr_end; base_vertex_nbr_itr--){
-                //nbr is the neighboring vertex to the simplex corresponding to this tid
-                nbr_diameter= d_CSR_distance_matrix->entries[base_vertex_nbr_itr];
-                nbr_index= d_CSR_distance_matrix->col_indices[base_vertex_nbr_itr];
-
-                //there are dim other vertices, in addition to the base_vertex
-                for(index_t other_vertex_index= 1; other_vertex_index<dim+1; other_vertex_index++){
-
-                    index_t other_vertex= shared_vertices[threadIdx.x * (dim + 1) + other_vertex_index];
-                    index_t other_vertex_nbr_itr= d_CSR_distance_matrix->offsets[other_vertex+1]-1;
-                    index_t other_vertex_nbr_end= d_CSR_distance_matrix->offsets[other_vertex];
-                    index_t other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                    while(other_vertex_nbr_index>nbr_index){
-                        if(other_vertex_nbr_itr==other_vertex_nbr_end) {
-                            next_cofacet= false;
-                            goto end_search_inloop;
-                        }
-                        other_vertex_nbr_itr--;
-                        other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                    }
-                    if(other_vertex_nbr_index!=nbr_index){
-                        goto try_next_vertex_inloop;
-                    }else{
-                        nbr_diameter= hd_max(nbr_diameter, d_CSR_distance_matrix->entries[other_vertex_nbr_itr]);
-                    }
-                }
-                //notice we must reverse the shared_vertices in the original ripser code since they are sorted in decreasing order
-                if(shared_vertices[threadIdx.x * (dim + 1)]>nbr_index){
-                    next_cofacet= false;
-                    goto end_search_inloop;
-                }
-                next_cofacet= true;
-                goto end_search_inloop;
-                try_next_vertex_inloop:;
-            }
-            next_cofacet= false;
-            end_search_inloop:;
-        }
-    }
-}
-
 //the hope is that this is concurrency-bug free, however this is very bad for sparse graph performance
 
 template <typename T>__global__ void populate_columns_to_reduce(T* d_flagarray, struct diameter_index_t_struct* d_columns_to_reduce, index_t* d_pivot_column_index,
@@ -1054,280 +715,6 @@ __global__ void coboundary_findapparent_single_kernel(value_t* d_cidx_to_diamete
     }
 }
 
-//gpuscan for sparse case
-__global__ void coboundary_findapparent_sparse_single_kernel(struct diameter_index_t_struct* d_cidx_diameter_sorted_list, struct diameter_index_t_struct * d_columns_to_reduce, index_t* d_lowest_one_of_apparent_pair,  const index_t dim, const index_t num_points, binomial_coeff_table* d_binomial_coeff, index_t num_columns_to_reduce, CSR_distance_matrix* d_CSR_distance_matrix, value_t threshold){//(this was for debugging), index_t* d_leftmostnz_inrow) {
-    index_t tid= (index_t) threadIdx.x + (index_t) blockIdx.x * (index_t) blockDim.x;
-    index_t stride= (index_t) blockDim.x * (index_t) gridDim.x;
-
-    extern __shared__ index_t shared_vertices[];//a 256x(dim+1) matrix; shared_vertices[threadIdx.x*(dim+1)+j]=the jth vertex for threadIdx.x thread in the thread block
-    //vertices sorted in reverse order
-
-    for (; tid < num_columns_to_reduce; tid += stride) {
-        //populate the shared_vertices[][] matrix with vertex indices of the column tid;
-        //row index of the shared_vertices matrix is threadIdx.x, col index of the shared_vertices matrix is offset
-        index_t offset= 0;
-
-        index_t v= num_points - 1;
-        index_t idx= d_columns_to_reduce[tid].index;
-
-        for (index_t k= dim + 1; k > 0; --k) {
-
-            if (!((*d_binomial_coeff)(v, k) <= idx)) {
-                index_t count= v;
-                while (count > 0) {
-                    index_t step= count >> 1;
-                    if (!((*d_binomial_coeff)(v - step, k) <= idx)) {
-                        v-= step + 1;
-                        count-= step + 1;//+1 is here to preserve the induction hypothesis (check v=4, k=4)
-                    } else
-                        count= step;//went too far, need to try a smaller step size to subtract from top
-                }
-            }
-
-            shared_vertices[threadIdx.x * (dim + 1) + offset++]= v;//set v to the largest possible vertex index given idx as a combinatorial index
-
-            idx-= (*d_binomial_coeff)(v, k);
-        }
-        index_t k= dim+1;
-
-        bool next_cofacet= false;
-        value_t nbr_diameter= -1;
-        index_t nbr_index= -1;
-        index_t idx_below= d_columns_to_reduce[tid].index;
-        index_t idx_above= 0;
-
-        index_t base_vertex_index= shared_vertices[threadIdx.x * (dim + 1)];
-        //this gives the entry indices of the right and left ends of the row indexed by base_vertex_index in the CSR distance matrix
-        index_t base_vertex_nbr_itr= d_CSR_distance_matrix->offsets[base_vertex_index+1]-1;
-        index_t base_vertex_nbr_end= d_CSR_distance_matrix->offsets[base_vertex_index];
-
-        for(; base_vertex_nbr_itr>=base_vertex_nbr_end; base_vertex_nbr_itr--){
-            //nbr is the neighboring vertex to the simplex corresponding to this tid
-            nbr_diameter= d_CSR_distance_matrix->entries[base_vertex_nbr_itr];
-            nbr_index= d_CSR_distance_matrix->col_indices[base_vertex_nbr_itr];
-            //there are dim other vertices besides the base_vertex
-            for(index_t other_vertex_idx=1; other_vertex_idx<dim+1; other_vertex_idx++){
-
-                index_t other_vertex= shared_vertices[threadIdx.x * (dim + 1) + other_vertex_idx];
-                index_t other_vertex_nbr_itr= d_CSR_distance_matrix->offsets[other_vertex+1]-1;
-                index_t other_vertex_nbr_end= d_CSR_distance_matrix->offsets[other_vertex];
-                index_t other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                while(other_vertex_nbr_index>nbr_index){
-                    if(other_vertex_nbr_itr==other_vertex_nbr_end) {
-                        next_cofacet= false;
-                        goto end_search;
-                    }
-                    other_vertex_nbr_itr--;
-                    other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                }
-                if(other_vertex_nbr_index!=nbr_index){
-                    goto try_next_vertex;
-                }else{
-                    nbr_diameter= hd_max(nbr_diameter, d_CSR_distance_matrix->entries[other_vertex_nbr_itr]);
-                }
-            }
-            while (k > 0 && shared_vertices[threadIdx.x * (dim + 1) + dim- (k - 1)] > nbr_index) {
-                idx_below -= (*d_binomial_coeff)(shared_vertices[threadIdx.x * (dim + 1) + dim- (k - 1)], k);
-                idx_above += (*d_binomial_coeff)(shared_vertices[threadIdx.x * (dim + 1) + dim- (k - 1)], k + 1);
-                --k;
-            }
-            next_cofacet= true;
-            goto end_search;
-            try_next_vertex:;
-        }
-        next_cofacet= false;
-        end_search:;
-
-        //end of search for next cofacet (sparse version)
-        while(next_cofacet) {
-            base_vertex_nbr_itr--;
-            value_t cofacet_diameter= hd_max(d_columns_to_reduce[tid].diameter, nbr_diameter);
-            index_t row_combinatorial_index= idx_above + (*d_binomial_coeff)(nbr_index, k + 1) + idx_below;
-            if(d_columns_to_reduce[tid].diameter==cofacet_diameter) {//this is a sufficient condition to finding a lowest one
-
-                //check if there is a nonzero to the left of (row_combinatorial_index, tid) in the coboundary matrix
-
-                //extra_vertex is the "added" vertex to shared_verticess
-                //FACT: {shared_vertices[threadIdx.x*(dim+1)+0]... shared_vertices[threadIdx.x*(dim+1)+dim] union extra_vertex} equals cofacet vertices
-
-                index_t prev_remove_v= -1;
-                index_t s_v= shared_vertices[threadIdx.x * (dim + 1)];//the largest indexed vertex, shared_vertices is sorted in decreasing orders
-                bool passed_extra_v= false;
-                index_t remove_v;//this is the vertex to remove from the cofacet
-                index_t extra_vertex= nbr_index;//the +1 is here to counteract the last v-- line of code
-                if (s_v > extra_vertex) {
-                    remove_v= s_v;
-                } else {
-                    remove_v= extra_vertex;
-                    passed_extra_v= true;
-                }
-                prev_remove_v= remove_v;
-                index_t facet_of_row_combinatorial_index= row_combinatorial_index;
-                facet_of_row_combinatorial_index-= (*d_binomial_coeff)(remove_v, dim + 2);//subtract the largest binomial coefficient to get the new cidx
-                index_t col_cidx= d_columns_to_reduce[tid].index;
-                value_t col_diameter= d_columns_to_reduce[tid].diameter;
-                //binary search d_columns_to_reduce to get face_of_row_diameter
-                value_t facet_of_row_diameter= -1;// there is no direct mapping: d_cidx_to_diameter[facet_of_row_combinatorial_index];
-
-                ///binary search goes here on d_cidx_diameter_sorted_list
-                index_t left= 0;
-                index_t right= num_columns_to_reduce-1;
-
-                while(left<=right){
-                    index_t mid= left + (right-left)/2;
-                    if(d_cidx_diameter_sorted_list[mid].index==facet_of_row_combinatorial_index){
-                        facet_of_row_diameter= d_cidx_diameter_sorted_list[mid].diameter;
-                        break;
-                    }
-                    if(d_cidx_diameter_sorted_list[mid].index<facet_of_row_combinatorial_index){
-                        left= mid+1;
-                    }else{
-                        right= mid-1;
-                    }
-                }
-                if (facet_of_row_combinatorial_index == col_cidx && facet_of_row_diameter == col_diameter) {//if there is an exact match of the tid column and the face of the row, then all subsequent faces to search will be to the right of column tid
-                    //coboundary column tid has an apparent pair, record it
-                    d_lowest_one_of_apparent_pair[tid]= row_combinatorial_index;
-                    break;
-                }
-
-                    //else if(d_cidx_to_diameter[facet_of_row_combinatorial_index]<= threshold && (
-                    //        d_cidx_to_diameter[facet_of_row_combinatorial_index]>d_columns_to_reduce[tid].diameter
-                    //        || (d_cidx_to_diameter[facet_of_row_combinatorial_index]==d_columns_to_reduce[tid].diameter && facet_of_row_combinatorial_index<d_columns_to_reduce[tid].index)
-                    //        || facet_of_row_combinatorial_index> d_columns_to_reduce[tid].index)){
-                    //FACT: it turns out we actually only need to check facet_of_row_diameter<= threshold &&(facet_of_row_diameter==col_diameter && facet_of_row_combinatorial_index<col_cidx)
-                    //since we should never have a face of the cofacet with diameter larger than the cofacet's diameter= column's diameter
-                    //in fact, we don't even need to check facet_of_row_diameter<=threshold since diam(face(cofacet(simplex)))<=diam(cofacet(simplex))=diam(simplex)<=threshold
-                    //furthremore, we don't even need to check facet_of_row_combinatorial_index<col_cidx since we will exit upon col_cidx while iterating in increasing combinatorial index
-                else if (facet_of_row_diameter == col_diameter) {
-                    assert(facet_of_row_diameter <= threshold &&
-                           (facet_of_row_diameter == col_diameter && facet_of_row_combinatorial_index < col_cidx));
-                    d_lowest_one_of_apparent_pair[tid]= -1;
-                    break;
-                }
-                bool found_apparent_or_found_nonzero_to_left= false;
-                //need to remove the last vertex: extra_v during searches
-                //there are dim+2 total number of vertices, the largest vertex was already checked so that is why k starts at dim+1
-                //j is the col. index, e.g. shared_vertices[threadIdx.x][j]=shared_vertices[threadIdx.x*(dim+1)+j]
-                for (index_t k= dim + 1, j= passed_extra_v ? 0 : 1;
-                     k >= 1; k--) {//start the loop after checking the lexicographically smallest facet boundary case
-                    if (passed_extra_v) {
-                        remove_v= shared_vertices[threadIdx.x * (dim + 1) + j];
-                        j++;
-                    } else if (j < dim + 1) {
-                        //compare s_v in shared_vertices with v
-                        index_t s_v= shared_vertices[threadIdx.x * (dim + 1) + j];
-                        if (s_v > extra_vertex) {
-                            remove_v= s_v;
-                            j++;
-                        } else {
-                            remove_v= extra_vertex;//recall: extra_vertex=nbr_index;
-                            passed_extra_v= true;
-                        }
-                        //this last else says: if j==dim+1 and we never passed extra vertex, then we must remove extra_vertex as the last vertex to remove to form a face.
-                    } else {//there is no need to check s_v>extra_vertex, we never passed extra_vertex, so we need to remove extra_vertex for the last check
-                        remove_v= extra_vertex;//recall; extra_vertex= nbr_index
-                        passed_extra_v= true;
-                    }
-
-                    //exchange remove_v choose k with prev_remove_v choose k
-                    facet_of_row_combinatorial_index -= (*d_binomial_coeff)(remove_v, k);
-                    facet_of_row_combinatorial_index += (*d_binomial_coeff)(prev_remove_v, k);
-
-                    //replace d_cidx_to_diameter with d_cidx_diameter_sorted_list;
-                    value_t facet_of_row_diameter= -1;// replacing direct map:: d_cidx_to_diameter[facet_of_row_combinatorial_index];
-
-                    ///binary search goes here on d_cidx_diameter_sorted_list
-                    index_t left= 0;
-                    index_t right= num_columns_to_reduce-1;
-
-                    while(left<=right){
-                        index_t mid= left + (right-left)/2;
-                        if(d_cidx_diameter_sorted_list[mid].index==facet_of_row_combinatorial_index){
-                            facet_of_row_diameter= d_cidx_diameter_sorted_list[mid].diameter;
-                            break;
-                        }
-                        if(d_cidx_diameter_sorted_list[mid].index<facet_of_row_combinatorial_index){
-                            left= mid+1;
-                        }else{
-                            right= mid-1;
-                        }
-                    }
-
-                    if (facet_of_row_combinatorial_index == col_cidx && facet_of_row_diameter == col_diameter) {
-                        //coboundary column tid has an apparent pair, record it
-                        d_lowest_one_of_apparent_pair[tid]= row_combinatorial_index;
-                        found_apparent_or_found_nonzero_to_left= true;
-                        break;///need to break out the while(v!=-1) loop
-                    }
-
-                        //else if(d_cidx_to_diameter[facet_of_row_combinatorial_index]<=threshold &&
-                        //( d_cidx_to_diameter[facet_of_row_combinatorial_index]>d_columns_to_reduce[tid].diameter
-                        //|| (d_cidx_to_diameter[facet_of_row_combinatorial_index]==d_columns_to_reduce[tid].diameter && facet_of_row_combinatorial_index<d_columns_to_reduce[tid].index)
-                        //|| facet_of_row_combinatorial_index>d_columns_to_reduce[tid].index)){
-                    else if (facet_of_row_diameter == col_diameter) {
-                        assert(facet_of_row_diameter <= threshold &&
-                               (facet_of_row_diameter == col_diameter && facet_of_row_combinatorial_index < col_cidx));
-
-                        //d_lowest_one_of_apparent_pair[tid]= -1;
-                        found_apparent_or_found_nonzero_to_left= true;
-                        break;
-                    }
-
-                    prev_remove_v= remove_v;
-                }
-                //we must exit early if we have a nonzero to left or the column is apparent
-                if (found_apparent_or_found_nonzero_to_left) {
-                    break;
-                }
-
-
-                //end check for nonzero to left
-            }
-
-
-            next_cofacet= false;
-            for(; base_vertex_nbr_itr>=base_vertex_nbr_end; base_vertex_nbr_itr--){
-                //nbr is the neighboring vertex to the simplex corresponding to this tid
-                nbr_diameter= d_CSR_distance_matrix->entries[base_vertex_nbr_itr];
-                nbr_index= d_CSR_distance_matrix->col_indices[base_vertex_nbr_itr];
-                //there are dim other vertices besides the base_vertex
-                for(index_t other_vertex_index=1; other_vertex_index<dim+1; other_vertex_index++){
-
-                    index_t other_vertex= shared_vertices[threadIdx.x * (dim + 1) + other_vertex_index];
-                    index_t other_vertex_nbr_itr= d_CSR_distance_matrix->offsets[other_vertex+1]-1;
-                    index_t other_vertex_nbr_end= d_CSR_distance_matrix->offsets[other_vertex];
-                    index_t other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                    while(other_vertex_nbr_index>nbr_index){
-                        if(other_vertex_nbr_itr==other_vertex_nbr_end) {
-                            next_cofacet= false;
-                            goto end_search_inloop;
-                        }
-                        other_vertex_nbr_itr--;
-                        other_vertex_nbr_index= d_CSR_distance_matrix->col_indices[other_vertex_nbr_itr];
-                    }
-                    if(other_vertex_nbr_index!=nbr_index){
-                        goto try_next_vertex_inloop;
-                    }else{
-                        nbr_diameter= hd_max(nbr_diameter, d_CSR_distance_matrix->entries[other_vertex_nbr_itr]);
-                    }
-                }
-                //notice we must reverse the shared_vertices since they are sorted in decreasing order
-                while (k > 0 && shared_vertices[threadIdx.x * (dim + 1) + dim- (k - 1)] > nbr_index) {
-                    idx_below -= (*d_binomial_coeff)(shared_vertices[threadIdx.x * (dim + 1) + dim- (k - 1)], k);
-                    idx_above += (*d_binomial_coeff)(shared_vertices[threadIdx.x * (dim + 1) + dim- (k - 1)], k + 1);
-                    --k;
-                }
-                next_cofacet= true;
-                goto end_search_inloop;
-                try_next_vertex_inloop:;
-            }
-            next_cofacet= false;
-            end_search_inloop:;
-        }
-    }
-}
-
 template <typename DistanceMatrix> class ripser {
     DistanceMatrix dist;//this can be either sparse or compressed
 
@@ -1351,10 +738,6 @@ private:
     index_t* h_pivot_column_index_array_OR_nonapparent_cols;//the pivot column index hashmap represented by an array OR the set of nonapparent column indices
 
     value_t* d_distance_matrix;//GPU copy of the distance matrix
-    CSR_distance_matrix* d_CSR_distance_matrix;
-    index_t *h_d_offsets;
-    value_t *h_d_entries;
-    index_t *h_d_col_indices;
 
     //d_pivot_column_index_OR_nonapparent_cols is d_nonapparent_cols when used in gpuscan() and compute_pairs() and is d_pivot_column_index when in gpu_assemble_columns()
     index_t* d_pivot_column_index_OR_nonapparent_cols;//the pivot column index hashmap represented on GPU as an array OR the set of nonapparent columns on GPU
@@ -1377,7 +760,6 @@ private:
     index_t num_apparent;//the number of apparent pairs found
 
     value_t* d_cidx_to_diameter;//GPU side mapping from cidx to diameters for gpuscan faces of a given row of a "lowest one" search
-    struct diameter_index_t_struct* d_cidx_diameter_pairs_sortedlist;//used as a sorted list of cidx,diameter pairs for lookup in gpuscan kernel for sparse case
 
 #if defined(ASSEMBLE_REDUCTION_SUBMATRIX)//assemble reduction submatrix
     index_t* d_flagarray_OR_index_to_subindex;//GPU data structure that maps index to subindex
@@ -1390,12 +772,6 @@ private:
     struct index_t_pair_struct* d_pivot_array;//sorted array of all pivots, substitute for a structured hashmap with lookup done by log(n) binary search
     struct index_t_pair_struct* h_pivot_array;//sorted array of all pivots
     std::vector<struct diameter_index_t_struct> columns_to_reduce;
-
-    //used for sparse_distance_matrix ONLY:
-    struct diameter_index_t_struct* d_simplices;//GPU copy of h_simplices
-    struct diameter_index_t_struct* h_simplices;//the simplices filtered by diameter that need to be considered for the next dimension's simplices
-    index_t* d_num_simplices=nullptr;//use d_num_simplices to keep track of the number of simplices in h_ or d_ simplices
-    index_t* h_num_simplices;//h_num_simplices is tied to d_num_simplices in pinned memory
 public:
 
     ripser(DistanceMatrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio)
@@ -1425,30 +801,6 @@ public:
             cudaFree(d_pivot_array);
         }
     }
-    void free_gpumem_sparse_computation() {
-        if (n >= 10) {
-            cudaFree(d_columns_to_reduce);
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
-            cudaFree(d_flagarray_OR_index_to_subindex);
-#endif
-//            if (CSR_distance_matrix .num_entries > 0) {
-            cudaFree(h_d_entries);
-//            }
-            cudaFree(h_d_offsets);
-
-            cudaFree(h_d_col_indices);
-            cudaFree(d_CSR_distance_matrix);
-            cudaFree(d_cidx_diameter_pairs_sortedlist);
-            cudaFree(d_pivot_column_index_OR_nonapparent_cols);
-            //if (binomial_coeff.get_num_n() * binomial_coeff.get_max_tuple_length() > 0) {
-            cudaFree(h_d_binoms);
-            //}
-            cudaFree(d_binomial_coeff);
-            cudaFree(d_lowest_one_of_apparent_pair);
-            cudaFree(d_pivot_array);
-            cudaFree(d_simplices);
-        }
-    }
 
     void free_init_cpumem() {
         free(h_pivot_column_index_array_OR_nonapparent_cols);
@@ -1458,44 +810,6 @@ public:
         free(h_columns_to_reduce);
         free(h_pivot_array);
         pivot_column_index.resize(0);
-    }
-
-    //calulate gpu_num_simplices_forall_dims based on GPU memory limit
-    index_t calculate_gpu_max_columns_for_sparserips_computation_from_memory(){
-        cudaGetDeviceProperties(&deviceProp, 0);
-
-        cudaMemGetInfo(&freeMem,&totalMem);
-#ifdef PROFILING
-        std::cerr<<"before calculation, sparse: total mem, free mem: "<<totalMem <<" bytes, "<<freeMem<<" bytes"<<std::endl;
-#endif
-        index_t gpumem_char_array_bytes_factor= sizeof(char);
-        index_t gpumem_index_t_array_bytes_factor= sizeof(index_t);
-        index_t gpumem_value_t_array_bytes_factor= sizeof(value_t);
-        index_t gpumem_index_t_pairs_array_bytes_factor= sizeof(index_t_pair_struct);
-        index_t gpumem_diameter_index_t_array_bytes_factor= sizeof(diameter_index_t_struct);
-        index_t gpumem_CSR_dist_matrix_bytes= sizeof(index_t)*(n+1+4)+(sizeof(index_t)+sizeof(value_t))*dist.num_entries;//sizeof(value_t)*(n*(n-1))/2;
-        index_t gpumem_binomial_coeff_table_bytes= sizeof(index_t)*binomial_coeff.get_num_n()*binomial_coeff.get_max_tuple_length() +sizeof(binomial_coeff_table);
-        index_t gpumem_index_t_bytes= sizeof(index_t);
-        index_t padding= 1024*1024*1024;//1GB padding
-
-        index_t fixedmemory= gpumem_index_t_bytes*4+gpumem_binomial_coeff_table_bytes+gpumem_CSR_dist_matrix_bytes+padding;
-//this can be larger but not smaller than actual sizeof(-) sum
-        index_t sizeof_factor_sum=
-                gpumem_diameter_index_t_array_bytes_factor
-                #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
-                +gpumem_index_t_array_bytes_factor
-                #endif
-                +gpumem_diameter_index_t_array_bytes_factor
-                +gpumem_index_t_array_bytes_factor
-                +gpumem_index_t_array_bytes_factor
-                +gpumem_index_t_pairs_array_bytes_factor
-                +gpumem_diameter_index_t_array_bytes_factor
-                +gpumem_index_t_pairs_array_bytes_factor;
-
-#ifdef PROFILING
-        std::cerr<<"sparse final calculation for memory, free memory: "<<freeMem <<" bytes, sizeof_factor_sum: "<<sizeof_factor_sum<<" bytes"<<std::endl;
-#endif
-        return (freeMem*0.7-fixedmemory)/sizeof_factor_sum;
     }
 
     index_t calculate_gpu_dim_max_for_fullrips_computation_from_memory(const index_t dim_max, const bool isfullrips){
@@ -1585,10 +899,6 @@ public:
                 v, [&](const index_t& w) -> bool { return (binomial_coeff(w, k) <= idx); });
     }
 
-    index_t get_edge_index(const index_t i, const index_t j) const {
-        return binomial_coeff(i, 2) + j;
-    }
-
     template <typename OutputIterator>
     OutputIterator get_simplex_vertices(index_t idx, const index_t dim, index_t v,
                                         OutputIterator out) const {
@@ -1621,8 +931,6 @@ public:
     void cpu_byneighbor_assemble_columns_to_reduce(std::vector<struct diameter_index_t_struct>& simplices, std::vector<struct diameter_index_t_struct>& columns_to_reduce,
                                                    hash_map<index_t, index_t>& pivot_column_index, index_t dim);
 
-    void cpu_assemble_columns_to_reduce(std::vector<struct diameter_index_t_struct>& columns_to_reduce,
-                                        hash_map<index_t, index_t>& pivot_column_index, index_t dim);
 
     void assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only, std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim);
 
@@ -2052,87 +1360,12 @@ public:
     }
 };
 
-template <> class ripser<sparse_distance_matrix>::simplex_coboundary_enumerator {
-    const ripser& parent;
-    index_t idx_below, idx_above, k;
-    std::vector<index_t> vertices;
-    const diameter_index_t_struct simplex;
-    const sparse_distance_matrix& dist;
-    std::vector<std::vector<index_diameter_t_struct>::const_reverse_iterator>& neighbor_it;
-    std::vector<std::vector<index_diameter_t_struct>::const_reverse_iterator>& neighbor_end;
-    index_diameter_t_struct neighbor;
-
-public:
-    simplex_coboundary_enumerator(const diameter_index_t_struct _simplex, const index_t _dim,
-                                  const ripser& _parent)
-            : parent(_parent), idx_below(_simplex.index), idx_above(0), k(_dim + 1),
-              vertices(_dim + 1), simplex(_simplex),
-              dist(parent.dist),
-              neighbor_it(dist.neighbor_it),
-              neighbor_end(dist.neighbor_end) {
-        neighbor_it.clear();
-        neighbor_end.clear();
-
-        parent.get_simplex_vertices(idx_below, _dim, parent.n, vertices.rbegin());
-        for (auto v : vertices) {
-            neighbor_it.push_back(dist.neighbors[v].rbegin());
-            neighbor_end.push_back(dist.neighbors[v].rend());
-        }
-    }
-
-    bool has_next(bool all_cofacets= true) {
-        //auto& x will permanently change upon updates to it.
-        for (auto &it0= neighbor_it[0], &end0= neighbor_end[0]; it0 != end0; ++it0) {
-            neighbor= *it0;//neighbor is a pair: diameter_index_t_struct
-            for (size_t idx= 1; idx < neighbor_it.size(); ++idx) {
-                auto &it= neighbor_it[idx], end= neighbor_end[idx];
-                //enforce the invariant that get_index(*it)<=get_index(neighbor)
-                while(it->index > neighbor.index)
-                    if (++it == end) return false;
-                if(it->index != neighbor.index)
-                    goto continue_outer;//try the next number in neighbor_it[0]
-                else
-                    //update neighbor to the max of matching vertices of "neighbors" of each vertex in simplex
-                    neighbor= (neighbor.diameter>it->diameter)?neighbor:*it;
-            }
-            while(k>0 && vertices[k-1]>neighbor.index){
-                if (!all_cofacets) return false;
-                idx_below -= parent.binomial_coeff(vertices[k - 1], k);
-                idx_above += parent.binomial_coeff(vertices[k - 1], k + 1);
-                --k;
-            }
-            return true;
-            continue_outer:;
-        }
-        return false;
-    }
-
-    diameter_index_t_struct next() {
-        ++neighbor_it[0];
-        value_t cofacet_diameter= std::max(simplex.diameter, neighbor.diameter);
-        index_t cofacet_index= idx_above+parent.binomial_coeff(neighbor.index,k+1)+idx_below;
-
-        return {cofacet_diameter,cofacet_index};
-    }
-};
-
 template<> std::vector<diameter_index_t_struct> ripser<compressed_lower_distance_matrix>::get_edges() {
     std::vector<diameter_index_t_struct> edges;
     for (index_t index= binomial_coeff(n, 2); index-- > 0;) {
         value_t diameter= compute_diameter(index, 1);
         if (diameter <= threshold) edges.push_back({diameter, index});
     }
-    return edges;
-}
-
-template <> std::vector<diameter_index_t_struct> ripser<sparse_distance_matrix>::get_edges() {
-    std::vector<diameter_index_t_struct> edges;
-    for (index_t i= 0; i < n; ++i)
-        for (auto nbr : dist.neighbors[i]) {
-            index_t j= nbr.index;
-            //(i choose 2) + (j choose 1) is the combinatorial index of nbr
-            if (i > j) edges.push_back({nbr.diameter, binomial_coeff(i, 2) + j});
-        }
     return edges;
 }
 
@@ -2221,86 +1454,6 @@ void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vect
 #endif
 }
 
-template <>
-void ripser<sparse_distance_matrix>::gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce
-){
-    union_find dset(n);
-
-    struct greaterdiam_lowerindex_diameter_index_t_struct_compare_reverse cmp_reverse;
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, populate_sparse_edges_preparingcount, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-
-    //grid_size will return 0 if we have CPU-only code inside d_CSR_distance_matrix
-    *h_num_simplices= 0;
-
-    //populate edges kernel cannot have some threads iterating in the inner for loop, preventing shfl_sync() from runnning
-
-    int* d_num;
-    CUDACHECK(cudaMalloc((void **) & d_num, sizeof(int)*(n+1)));
-    cudaMemset(d_num, 0, sizeof(int)*(n+1));
-
-    populate_sparse_edges_preparingcount<<<grid_size, 256>>>(d_num, d_CSR_distance_matrix, n, d_num_simplices);
-    CUDACHECK(cudaDeviceSynchronize());
-    thrust::exclusive_scan(thrust::device, d_num, d_num+n+1, d_num, 0);
-
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, populate_sparse_edges_prefixsum, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-
-    populate_sparse_edges_prefixsum<<<grid_size,256>>>(d_simplices, d_num, d_CSR_distance_matrix, d_binomial_coeff, n, d_num_simplices);
-    CUDACHECK(cudaDeviceSynchronize());
-
-    thrust::sort(thrust::device, d_simplices, d_simplices+ *h_num_simplices, cmp_reverse);
-    CUDACHECK(cudaDeviceSynchronize());
-
-#ifdef COUNTING
-    std::cerr<<"num (sparse) edges filtered: "<<*h_num_simplices<<std::endl;
-#endif
-
-    cudaMemcpy(h_simplices, d_simplices, sizeof(struct diameter_index_t_struct)*(*h_num_simplices), cudaMemcpyDeviceToHost);
-
-#ifdef PRINT_PERSISTENCE_PAIRS
-    std::cout << "persistence intervals in dim 0:" << std::endl;
-#endif
-
-
-    std::vector<index_t> vertices_of_edge(2);
-    for(index_t idx=0; idx<*h_num_simplices; idx++){
-        struct diameter_index_t_struct e= h_simplices[idx];
-        vertices_of_edge.clear();
-        get_simplex_vertices(e.index, 1, n, std::back_inserter(vertices_of_edge));
-        index_t u= dset.find(vertices_of_edge[0]), v= dset.find(vertices_of_edge[1]);
-
-        if (u != v) {
-#if defined(PRINT_PERSISTENCE_PAIRS) || defined(PYTHON_BARCODE_COLLECTION)
-            if(e.diameter!=0) {
-#ifdef PRINT_PERSISTENCE_PAIRS
-                std::cout << " [0," << e.diameter << ")" << std::endl;
-#endif
-                birth_death_coordinate barcode = {0,e.diameter};
-                list_of_barcodes[0].push_back(barcode);
-            }
-#endif
-            dset.link(u, v);
-        } else {
-            columns_to_reduce.push_back(e);
-        }
-    }
-    std::reverse(columns_to_reduce.begin(), columns_to_reduce.end());
-    //don't want to reverse the h_columns_to_reduce so just put into vector and copy later
-#pragma omp parallel for schedule(guided,1)
-    for(index_t i=0; i<columns_to_reduce.size(); i++){
-        h_columns_to_reduce[i]= columns_to_reduce[i];
-    }
-    *h_num_columns_to_reduce= columns_to_reduce.size();
-    *h_num_nonapparent= *h_num_columns_to_reduce;//we haven't found any apparent columns yet, so set all columns to nonapparent
-#ifdef PRINT_PERSISTENCE_PAIRS
-    for (index_t i= 0; i < n; ++i)
-        if (dset.find(i) == i) std::cout << " [0, )" << std::endl << std::flush;
-#endif
-#ifdef COUNTING
-    std::cerr<<"num cols to reduce: dim 1, "<<*h_num_columns_to_reduce<<std::endl;
-#endif
-}
 //finding apparent pairs
 template <>
 void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
@@ -2393,84 +1546,6 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
 }
 
 //finding apparent pairs
-template <>
-void ripser<sparse_distance_matrix>::gpuscan(const index_t dim){
-    //(need to sort for filtration order before gpuscan first, then apply gpu scan then sort again)
-    //note: scan kernel can eliminate high percentage of columns in little time.
-    //filter by fully reduced columns (apparent pairs) found by gpu scan
-
-    //need this to prevent 0-blocks kernels from executing
-    if(*h_num_columns_to_reduce==0){
-        return;
-    }
-    index_t num_simplices= binomial_coeff(n,dim+1);
-#ifdef COUNTING
-    std::cerr<<"max possible num simplices: "<<num_simplices<<std::endl;
-#endif
-
-    cudaMemcpy(d_columns_to_reduce, h_columns_to_reduce,
-               sizeof(struct diameter_index_t_struct) * *h_num_columns_to_reduce, cudaMemcpyHostToDevice);
-
-    CUDACHECK(cudaDeviceSynchronize());
-
-    //use binary search on d_columns_to_reduce as retrival process
-
-    cudaMemcpy(d_cidx_diameter_pairs_sortedlist, d_columns_to_reduce, sizeof(struct diameter_index_t_struct)*(*h_num_columns_to_reduce), cudaMemcpyDeviceToDevice);
-    struct lowerindex_lowerdiam_diameter_index_t_struct_compare cmp_cidx_diameter;
-    thrust::sort(thrust::device, d_cidx_diameter_pairs_sortedlist, d_cidx_diameter_pairs_sortedlist+*h_num_columns_to_reduce, cmp_cidx_diameter);
-    CUDACHECK(cudaDeviceSynchronize());
-
-    cudaMemset(d_lowest_one_of_apparent_pair, -1, sizeof(index_t) * *h_num_columns_to_reduce);
-    CUDACHECK(cudaDeviceSynchronize());
-
-    Stopwatch sw;
-    sw.start();
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, coboundary_findapparent_sparse_single_kernel, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-    coboundary_findapparent_sparse_single_kernel<<<grid_size, 256, 256 * (dim + 1) * sizeof(index_t)>>>(d_cidx_diameter_pairs_sortedlist, d_columns_to_reduce, d_lowest_one_of_apparent_pair, dim, n, d_binomial_coeff, *h_num_columns_to_reduce, d_CSR_distance_matrix, threshold);
-
-    CUDACHECK(cudaDeviceSynchronize());
-    sw.stop();
-#ifdef PROFILING
-    std::cerr<<"gpu scan kernel time for dim: "<<dim<<": "<<sw.ms()/1000.0<<"s"<<std::endl;
-#endif
-    CUDACHECK(cudaDeviceSynchronize());
-
-    //post processing (inserting appararent pairs into a "hash map": 2 level data structure) now on GPU
-    Stopwatch postprocessing;
-    postprocessing.start();
-    struct row_cidx_column_idx_struct_compare cmp_pivots;
-
-    //put pairs into an array
-
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, gpu_insert_pivots_kernel, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-    gpu_insert_pivots_kernel<<<grid_size, 256>>>(d_pivot_array, d_lowest_one_of_apparent_pair, d_pivot_column_index_OR_nonapparent_cols, *h_num_columns_to_reduce, d_num_nonapparent);
-    CUDACHECK(cudaDeviceSynchronize());
-    thrust::sort(thrust::device, d_pivot_array, d_pivot_array+*h_num_columns_to_reduce, cmp_pivots);
-    thrust::sort(thrust::device, d_pivot_column_index_OR_nonapparent_cols, d_pivot_column_index_OR_nonapparent_cols+*h_num_nonapparent);
-
-    num_apparent= *h_num_columns_to_reduce-*h_num_nonapparent;
-#ifdef COUNTING
-    std::cerr<<"num apparent for dim: "<<dim<<" is: "<<num_apparent<<std::endl;
-#endif
-    //transfer to CPU side all GPU data structures
-    cudaMemcpy(h_pivot_array, d_pivot_array, sizeof(index_t_pair_struct)*(num_apparent), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_pivot_column_index_array_OR_nonapparent_cols, d_pivot_column_index_OR_nonapparent_cols, sizeof(index_t)*(*h_num_nonapparent), cudaMemcpyDeviceToHost);
-
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
-    cudaMemset(d_flagarray_OR_index_to_subindex, -1, sizeof(index_t)* *h_num_columns_to_reduce);
-    //perform the scatter operation
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, init_index_to_subindex, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-    init_index_to_subindex<<<grid_size, 256>>>(d_flagarray_OR_index_to_subindex, d_pivot_column_index_OR_nonapparent_cols, *h_num_nonapparent);
-    cudaMemcpy(h_flagarray_OR_index_to_subindex, d_flagarray_OR_index_to_subindex, sizeof(index_t)*(*h_num_columns_to_reduce), cudaMemcpyDeviceToHost);
-#endif
-    postprocessing.stop();
-#ifdef PROFILING
-    std::cerr<<"INSERTION POSTPROCESSING FOR GPU IN DIM "<<dim<<": "<<postprocessing.ms()/1000.0<<"s"<<std::endl;
-#endif
-}
 
 template <>
 void ripser<compressed_lower_distance_matrix>::gpu_assemble_columns_to_reduce_plusplus(const index_t dim) {
@@ -2551,58 +1626,6 @@ void ripser<compressed_lower_distance_matrix>::gpu_assemble_columns_to_reduce_pl
 }
 
 template <>
-void ripser<sparse_distance_matrix>::gpu_assemble_columns_to_reduce_plusplus(const index_t dim) {
-    index_t max_num_simplices= binomial_coeff(n,dim+1);
-#ifdef COUNTING
-    std::cerr<<"max possible num simplices: "<<max_num_simplices<<std::endl;
-#endif
-    *h_num_columns_to_reduce= 0;
-
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, populate_sparse_simplices_warpfiltering, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-    //columns_to_reduce contains the "new set" of simplices
-#ifdef COUNTING
-    std::cerr<<"(sparse) num simplices before kernel call: "<<*h_num_simplices<<std::endl;
-#endif
-
-    populate_sparse_simplices_warpfiltering<<<grid_size, 256, 256 * dim * sizeof(index_t)>>>(d_simplices, d_num_simplices, d_columns_to_reduce, d_num_columns_to_reduce, d_CSR_distance_matrix, n, dim, threshold, d_binomial_coeff);
-    CUDACHECK(cudaDeviceSynchronize());
-
-    cudaMemcpy(d_simplices, d_columns_to_reduce, sizeof(struct diameter_index_t_struct)*(*h_num_columns_to_reduce),cudaMemcpyDeviceToDevice);
-    *h_num_simplices= *h_num_columns_to_reduce;
-
-#ifdef COUNTING
-    std::cerr<<"(sparse) num simplices for dim "<<dim<<": "<<*h_num_simplices<<std::endl;
-#endif
-    struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
-
-    thrust::sort(thrust::device, d_simplices, d_simplices+*h_num_simplices, cmp);
-    CUDACHECK(cudaDeviceSynchronize());
-    cudaMemcpy(h_simplices, d_simplices, sizeof(struct diameter_index_t_struct)*(*h_num_simplices),cudaMemcpyDeviceToHost);
-
-    //populate the columns_to_reduce vector on CPU side
-    struct row_cidx_column_idx_struct_compare pair_cmp;
-    columns_to_reduce.clear();
-    for(index_t i=0; i<*h_num_simplices; i++){
-        struct diameter_index_t_struct s= h_simplices[i];
-
-        if(s.diameter<=threshold &&
-           get_value_pivot_array_hashmap(s.index, pair_cmp)==-1){
-            columns_to_reduce.push_back(s);
-        }
-    }
-#ifdef COUNTING
-    std::cerr<<"columns to reduce for dim: "<<dim<<": "<<columns_to_reduce.size()<<std::endl;
-#endif
-    *h_num_columns_to_reduce= columns_to_reduce.size();
-
-#pragma omp parallel for schedule(guided,1)
-    for(index_t i=0; i<columns_to_reduce.size(); i++){
-        h_columns_to_reduce[i]= columns_to_reduce[i];
-    }
-}
-
-template <>
 void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& simplices,
                                                                                          std::vector<diameter_index_t_struct>& columns_to_reduce,
                                                                                          hash_map<index_t,index_t>& pivot_column_index, index_t dim){
@@ -2652,101 +1675,6 @@ void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_t
     std::cerr << clear_line << std::flush;
 #endif
 
-}
-
-template <>
-void ripser<sparse_distance_matrix>::cpu_byneighbor_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& simplices,
-                                                                               std::vector<diameter_index_t_struct>& columns_to_reduce,
-                                                                               hash_map<index_t,index_t>& pivot_column_index, index_t dim){
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << "assembling columns" << std::flush;
-    std::chrono::steady_clock::time_point next= std::chrono::steady_clock::now() + time_step;
-#endif
-    --dim;
-    columns_to_reduce.clear();
-    std::vector<struct diameter_index_t_struct> next_simplices;
-
-    for (struct diameter_index_t_struct& simplex : simplices) {
-
-        simplex_coboundary_enumerator cofacets(simplex, dim, *this);
-
-        while (cofacets.has_next(false)) {
-#ifdef INDICATE_PROGRESS
-            if (std::chrono::steady_clock::now() > next) {
-                       std::cerr << clear_line << "assembling " << next_simplices.size()
-                                 << " columns (processing " << std::distance(&simplices[0], &simplex)
-                                 << "/" << simplices.size() << " simplices)" << std::flush;
-                       next= std::chrono::steady_clock::now() + time_step;
-                   }
-#endif
-            auto cofacet= cofacets.next();
-            if (cofacet.diameter <= threshold) {
-
-                next_simplices.push_back(cofacet);
-
-                if (pivot_column_index.find(cofacet.index) == pivot_column_index.end()) { //|| pivot_column_index[cofacet.index]==-1)
-                    columns_to_reduce.push_back(cofacet);
-                }
-            }
-        }
-    }
-
-    simplices.swap(next_simplices);
-
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << "sorting " << columns_to_reduce.size() << " columns"
-                     << std::flush;
-#endif
-    struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
-    std::sort(columns_to_reduce.begin(), columns_to_reduce.end(),
-              cmp);
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << std::flush;
-#endif
-
-}
-
-template <>
-void ripser<compressed_lower_distance_matrix>::cpu_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& columns_to_reduce,
-                                                                              hash_map<index_t, index_t>& pivot_column_index,
-                                                                              index_t dim) {
-    index_t num_simplices= binomial_coeff(n, dim + 1);
-#ifdef COUNTING
-    std::cerr<<"max num possible simplices: "<<num_simplices<<std::endl;
-#endif
-    columns_to_reduce.clear();
-
-#ifdef INDICATE_PROGRESS
-    std::cerr << "\033[K"
-	          << "assembling " << num_simplices << " columns" << std::flush << "\r";
-#endif
-    index_t count= 0;
-    for (index_t index= 0; index < num_simplices; ++index) {
-        if (pivot_column_index.find(index) == pivot_column_index.end()) {
-            value_t diameter= compute_diameter(index, dim);
-            if (diameter <= threshold){
-                columns_to_reduce.push_back({diameter,index});
-                count++;
-            }
-#ifdef INDICATE_PROGRESS
-            if ((index + 1) % 1000000 == 0)
-				std::cerr << "\033[K"
-				          << "assembled " << columns_to_reduce.size() << " out of " << (index + 1)
-				          << "/" << num_simplices << " columns" << std::flush << "\r";
-#endif
-        }
-    }
-
-#ifdef INDICATE_PROGRESS
-    std::cerr << "\033[K"
-	          << "sorting " << num_simplices << " columns" << std::flush << "\r";
-#endif
-    struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
-    std::sort(columns_to_reduce.begin(), columns_to_reduce.end(),
-              cmp);
-#ifdef INDICATE_PROGRESS
-    std::cerr << "\033[K";
-#endif
 }
 
 template <>
@@ -2970,215 +1898,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
     }
 }
 
-template <>
-void ripser<sparse_distance_matrix>::compute_barcodes() {
-    Stopwatch sw, gpu_accel_timer;
-    gpu_accel_timer.start();
-    sw.start();
 
-    index_t maxgpu_dim = calculate_gpu_dim_max_for_fullrips_computation_from_memory(dim_max, false);
-    if (maxgpu_dim < dim_max) {
-        max_num_simplices_forall_dims = calculate_gpu_max_columns_for_sparserips_computation_from_memory();
-#ifdef COUNTING
-        std::cerr<<"(sparse) max possible num simplices for memory allocation forall dims: "<<max_num_simplices_forall_dims<<std::endl;
-#endif
-    } else {
-        max_num_simplices_forall_dims =
-                dim_max < (n / 2) - 1 ? get_num_simplices_for_dim(dim_max) : get_num_simplices_for_dim((n / 2) - 1);
-#ifdef COUNTING
-        std::cerr<<"(dense case used in sparse computation) max possible num simplices for memory allocation forall dims: "<<max_num_simplices_forall_dims<<std::endl;
-#endif
-    }
-
-    //we assume that we have enough memory to last up to dim_max (should be fine with a >=32GB GPU); growth of num simplices can be very slow for sparse case
-    if (dim_max >= 1) {
-
-        CUDACHECK(cudaMalloc((void **) &d_columns_to_reduce,
-                             sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims));//46000000
-        h_columns_to_reduce = (struct diameter_index_t_struct *) malloc(
-                sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims);
-
-        if (h_columns_to_reduce == nullptr) {
-            std::cerr << "malloc for h_columns_to_reduce failed" << std::endl;
-            exit(1);
-        }
-
-#if defined(ASSEMBLE_REDUCTION_SUBMATRIX)
-        CUDACHECK(cudaMalloc((void **) &d_flagarray_OR_index_to_subindex,
-                             sizeof(index_t) * max_num_simplices_forall_dims));
-
-        h_flagarray_OR_index_to_subindex = (index_t *) malloc(sizeof(index_t) * max_num_simplices_forall_dims);
-        if (h_flagarray_OR_index_to_subindex == nullptr) {
-            std::cerr << "malloc for h_index_to_subindex failed" << std::endl;
-        }
-#endif
-
-        CSR_distance_matrix CSR_distance_matrix = dist.toCSR();
-        //copy CSR_distance_matrix object over to GPU
-        CUDACHECK(cudaMalloc((void **) &d_CSR_distance_matrix, sizeof(CSR_distance_matrix)));
-        cudaMemcpy(d_CSR_distance_matrix, &CSR_distance_matrix, sizeof(CSR_distance_matrix), cudaMemcpyHostToDevice);
-
-        CUDACHECK(cudaMalloc((void **) &h_d_offsets, sizeof(index_t) * (CSR_distance_matrix.n + 1)));
-        cudaMemcpy(h_d_offsets, CSR_distance_matrix.offsets, sizeof(index_t) * (CSR_distance_matrix.n + 1),
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(&(d_CSR_distance_matrix->offsets), &h_d_offsets, sizeof(index_t *), cudaMemcpyHostToDevice);
-
-        CUDACHECK(cudaMalloc((void **) &h_d_entries, sizeof(value_t) * CSR_distance_matrix.num_entries));
-        cudaMemcpy(h_d_entries, CSR_distance_matrix.entries, sizeof(value_t) * CSR_distance_matrix.num_entries,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(&(d_CSR_distance_matrix->entries), &h_d_entries, sizeof(value_t *), cudaMemcpyHostToDevice);
-
-        CUDACHECK(cudaMalloc((void **) &h_d_col_indices, sizeof(index_t) * CSR_distance_matrix.num_entries));
-        cudaMemcpy(h_d_col_indices, CSR_distance_matrix .col_indices, sizeof(index_t) * CSR_distance_matrix .num_entries,
-                   cudaMemcpyHostToDevice);
-
-        cudaMemcpy(&(d_CSR_distance_matrix->col_indices), &h_d_col_indices, sizeof(index_t *), cudaMemcpyHostToDevice);
-
-        //this replaces d_cidx_to_diameter
-        CUDACHECK(cudaMalloc((void **) &d_cidx_diameter_pairs_sortedlist,
-                             sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims));
-
-        CUDACHECK(cudaMalloc((void **) &d_pivot_column_index_OR_nonapparent_cols,
-                             sizeof(index_t) * max_num_simplices_forall_dims));
-
-        //this array is used for both the pivot column index hash table array as well as the nonapparent cols array as an unstructured hashmap
-        h_pivot_column_index_array_OR_nonapparent_cols = (index_t *) malloc(
-                sizeof(index_t) * max_num_simplices_forall_dims);
-        if (h_pivot_column_index_array_OR_nonapparent_cols == nullptr) {
-            std::cerr << "malloc for h_pivot_column_index_array_OR_nonapparent_cols failed" << std::endl;
-            exit(1);
-        }
-
-        //copy object over to GPU
-        CUDACHECK(cudaMalloc((void **) &d_binomial_coeff, sizeof(binomial_coeff_table)));
-        cudaMemcpy(d_binomial_coeff, &binomial_coeff, sizeof(binomial_coeff_table), cudaMemcpyHostToDevice);
-
-        index_t num_binoms = binomial_coeff.get_num_n() * binomial_coeff.get_max_tuple_length();
-
-        CUDACHECK(cudaMalloc((void **) &h_d_binoms, sizeof(index_t) * num_binoms));
-        cudaMemcpy(h_d_binoms, binomial_coeff.binoms, sizeof(index_t) * num_binoms, cudaMemcpyHostToDevice);
-        cudaMemcpy(&(d_binomial_coeff->binoms), &h_d_binoms, sizeof(index_t *), cudaMemcpyHostToDevice);
-
-        cudaHostAlloc((void **) &h_num_columns_to_reduce, sizeof(index_t), cudaHostAllocPortable | cudaHostAllocMapped);
-        cudaHostGetDevicePointer(&d_num_columns_to_reduce, h_num_columns_to_reduce, 0);
-        cudaHostAlloc((void **) &h_num_nonapparent, sizeof(index_t), cudaHostAllocPortable | cudaHostAllocMapped);
-        cudaHostGetDevicePointer(&d_num_nonapparent, h_num_nonapparent, 0);
-        cudaHostAlloc((void **) &h_num_simplices, sizeof(index_t), cudaHostAllocPortable | cudaHostAllocMapped);
-        cudaHostGetDevicePointer(&d_num_simplices, h_num_simplices, 0);
-
-        CUDACHECK(
-                cudaMalloc((void **) &d_lowest_one_of_apparent_pair, sizeof(index_t) * max_num_simplices_forall_dims));
-        CUDACHECK(cudaMalloc((void **) &d_pivot_array,
-                             sizeof(struct index_t_pair_struct) * max_num_simplices_forall_dims));
-        h_pivot_array = (struct index_t_pair_struct *) malloc(
-                sizeof(struct index_t_pair_struct) * max_num_simplices_forall_dims);
-        if (h_pivot_array == nullptr) {
-            std::cerr << "malloc for h_pivot_array failed" << std::endl;
-            exit(1);
-        }
-        CUDACHECK(cudaMalloc((void **) &d_simplices,
-                             sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims));
-        h_simplices = (struct diameter_index_t_struct *) malloc(
-                sizeof(struct diameter_index_t_struct) * max_num_simplices_forall_dims);
-
-        if (h_simplices == nullptr) {
-            std::cerr << "malloc for h_simplices failed" << std::endl;
-            exit(1);
-        }
-#ifdef PROFILING
-        cudaMemGetInfo(&freeMem,&totalMem);
-        std::cerr<<"after GPU memory allocation: total mem, free mem: " <<totalMem<<" bytes, "<<freeMem<<" bytes"<<std::endl;
-#endif
-
-    }
-    sw.stop();
-#ifdef PROFILING
-    std::cerr<<"CUDA PREPROCESSING TIME (e.g. memory allocation): "<<sw.ms()/1000.0<<"s"<<std::endl;
-#endif
-    sw.start();
-
-    columns_to_reduce.clear();
-    if (dim_max >= 1) {
-
-        gpu_compute_dim_0_pairs(columns_to_reduce);
-        sw.stop();
-#ifdef PROFILING
-        std::cerr<<"0-dimensional persistence total computation time with GPU: "<<sw.ms()/1000.0<<"s"<<std::endl;
-#endif
-    } else {
-        std::vector<diameter_index_t_struct> simplices;
-        compute_dim_0_pairs(simplices, columns_to_reduce);
-        sw.stop();
-#ifdef PROFILING
-        std::cerr<<"0-dimensional persistence total computation time with CPU alone: "<<sw.ms()/1000.0<<"s"<<std::endl;
-#endif
-    }
-
-    //index_t dim_forgpuscan= MAX_INT64;//never do gpuscan
-    index_t dim_forgpuscan = 1;
-    for (index_t dim = 1; dim <= dim_max; ++dim) {
-        Stopwatch sw;
-        sw.start();
-#ifdef USE_PHASHMAP
-        phmap_clear();
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        pivot_column_index.clear();
-            pivot_column_index.resize(*h_num_columns_to_reduce);
-#endif
-        *h_num_nonapparent = 0;
-
-        gpuscan(dim);
-        //dim_forgpuscan= dim;
-        sw.stop();
-#ifdef PROFILING
-        std::cerr << "-SUM OF GPU MATRIX SCAN and post processing time for dim " << dim << ": " << sw.ms() / 1000.0
-                  << "s" << std::endl;
-#endif
-
-        sw.start();
-
-        compute_pairs_plusplus(
-                dim, dim_forgpuscan);
-        sw.stop();
-#ifdef PROFILING
-        std::cerr << "SUBMATRIX REDUCTION TIME for dim " << dim << ": " << sw.ms() / 1000.0 << "s" << "\n" << std::endl;
-#endif
-        if (dim < dim_max) {
-            sw.start();
-            gpu_assemble_columns_to_reduce_plusplus(dim + 1);
-
-            sw.stop();
-
-#ifdef PROFILING
-            std::cerr << "ASSEMBLE COLS TIME for dim " << dim + 1 << ": " << sw.ms() / 1000.0
-                      << "s" << std::endl;
-#endif
-        }
-    }
-    gpu_accel_timer.stop();
-#ifdef PROFILING
-    std::cerr<<"GPU ACCELERATED COMPUTATION: "<<gpu_accel_timer.ms()/1000.0<<"s"<<std::endl;
-#endif
-
-    if (maxgpu_dim >= 1 && n>=10) {
-        free_init_cpumem();
-        free_remaining_cpumem();
-        free_gpumem_sparse_computation();
-
-        cudaFreeHost(h_num_columns_to_reduce);
-        cudaFreeHost(h_num_nonapparent);
-        //free(h_pivot_array)
-        //free(h_columns_to_reduce)
-        //free(h_pivot_column_index_array_OR_nonapparent_cols)
-#if defined(ASSEMBLE_REDUCTION_SUBMATRIX)
-        free(h_flagarray_OR_index_to_subindex);
-#endif
-        cudaFreeHost(h_num_simplices);
-        free(h_simplices);
-    }
-}
-///I/O code
 
 template <typename T> T read(std::istream& s) {
     T result;
@@ -3310,10 +2030,7 @@ int main(int argc, char** argv) {
 
     if(threshold == std::numeric_limits<value_t>::max()) threshold = enclosing_radius;
 
-    if(use_sparse) {
-        ripser<sparse_distance_matrix>(sparse_distance_matrix(dist, threshold), dim_max, threshold, ratio).compute_barcodes();
-    }
-    else {
-        ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
-    }
+
+    ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
+
 }
