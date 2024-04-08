@@ -1113,101 +1113,50 @@ public:
     }
 #endif
 
-    void compute_pairs(std::vector<diameter_index_t_struct>& columns_to_reduce,
-                       hash_map<index_t, index_t>& pivot_column_index, index_t dim) {
-
-#ifdef PRINT_PERSISTENCE_PAIRS
+    void compute_pairs(std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t, index_t>& pivot_column_index, index_t dim) {
         std::cout << "persistence intervals in dim " << dim << ":" << std::endl;
-#endif
-#ifdef CPUONLY_ASSEMBLE_REDUCTION_MATRIX
-        compressed_sparse_matrix<diameter_index_t_struct> reduction_matrix;
-#endif
-        for (index_t index_column_to_reduce= 0; index_column_to_reduce < columns_to_reduce.size();
-             ++index_column_to_reduce) {
-
+        for(index_t index_column_to_reduce= 0; index_column_to_reduce < columns_to_reduce.size(); ++index_column_to_reduce) {
             auto column_to_reduce= columns_to_reduce[index_column_to_reduce];
-
             std::priority_queue<diameter_index_t_struct, std::vector<diameter_index_t_struct>,
-            greaterdiam_lowerindex_diameter_index_t_struct_compare>
-#ifdef CPUONLY_ASSEMBLE_REDUCTION_MATRIX
-            working_reduction_column,
-#endif
-                    working_coboundary;
-
-            value_t diameter= column_to_reduce.diameter;
-
-#ifdef INDICATE_PROGRESS
-            if ((index_column_to_reduce + 1) % 1000000 == 0)
-				std::cerr << "\033[K"
-				          << "reducing column " << index_column_to_reduce + 1 << "/"
-				          << columns_to_reduce.size() << " (diameter " << diameter << ")"
-				          << std::flush << "\r";
-#endif
-
-            index_t index_column_to_add= index_column_to_reduce;
-
+            greaterdiam_lowerindex_diameter_index_t_struct_compare> working_coboundary;
+            value_t diameter = column_to_reduce.diameter;
+            index_t index_column_to_add = index_column_to_reduce;
             diameter_index_t_struct pivot;
-
             // initialize index bounds of reduction matrix
-#ifdef CPUONLY_ASSEMBLE_REDUCTION_MATRIX
-            reduction_matrix.append_column();
-#endif
-            pivot= init_coboundary_and_get_pivot_fullmatrix(columns_to_reduce[index_column_to_add], working_coboundary, dim, pivot_column_index);
-
-            while (true) {
-                if(pivot.index!=-1){
+            pivot = init_coboundary_and_get_pivot_fullmatrix(columns_to_reduce[index_column_to_add], working_coboundary, dim, pivot_column_index);
+            while(true) {
+                if(pivot.index!=-1) {
                     auto left_pair= pivot_column_index.find(pivot.index);
-                    if (left_pair != pivot_column_index.end()) {
+                    if(left_pair != pivot_column_index.end()) {
                         index_column_to_add= left_pair->second;
-#ifdef CPUONLY_ASSEMBLE_REDUCTION_MATRIX
-                        add_coboundary_fullmatrix(reduction_matrix, columns_to_reduce, index_column_to_add, dim, working_reduction_column, working_coboundary);
-                        pivot= get_pivot(working_coboundary);
-#else
                         add_simplex_coboundary_oblivious(columns_to_reduce[index_column_to_add], dim, working_coboundary);
                         pivot= get_pivot(working_coboundary);
-#endif
-                    } else {
-#if defined(PRINT_PERSISTENCE_PAIRS) || defined(PYTHON_BARCODE_COLLECTION)
+                    }
+                    else {
                         value_t death= pivot.diameter;
-                        if (death > diameter * ratio) {
-#ifdef INDICATE_PROGRESS
-                            std::cerr << "\033[K";
-#endif
-#ifdef PRINT_PERSISTENCE_PAIRS
+                        if(death > diameter * ratio) {
                             std::cout << " [" << diameter << "," << death << ")" << std::endl
                                       << std::flush;
-#endif
                             birth_death_coordinate barcode = {diameter,death};
                             list_of_barcodes[dim].push_back(barcode);
                         }
-#endif
                         pivot_column_index[pivot.index]= index_column_to_reduce;
 
                         break;
                     }
-                } else {
-#ifdef PRINT_PERSISTENCE_PAIRS
+                }
+                else {
                     std::cout << " [" << diameter << ", )" << std::endl << std::flush;
-#endif
                     break;
                 }
             }
         }
     }
 
-    void compute_pairs_plusplus(
-            index_t dim,
-            index_t gpuscan_startingdim) {
+    void compute_pairs_plusplus(index_t dim, index_t gpuscan_startingdim) {
 
-#ifdef PRINT_PERSISTENCE_PAIRS
         std::cout << "persistence intervals in dim " << dim << ":" << std::endl;
-#endif
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
         compressed_sparse_submatrix<diameter_index_t_struct> reduction_submatrix;
-#endif
-#ifdef INDICATE_PROGRESS
-        std::chrono::steady_clock::time_point next= std::chrono::steady_clock::now() + time_step;
-#endif
         struct row_cidx_column_idx_struct_compare cmp_pivots;
         index_t num_columns_to_iterate= *h_num_columns_to_reduce;
         if(dim>=gpuscan_startingdim){
@@ -1223,9 +1172,7 @@ public:
 
             std::priority_queue<diameter_index_t_struct, std::vector<diameter_index_t_struct>,
             greaterdiam_lowerindex_diameter_index_t_struct_compare>
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
                     working_reduction_column,
-#endif
                     working_coboundary;
 
             value_t diameter= column_to_reduce.diameter;
@@ -1233,85 +1180,41 @@ public:
             index_t index_column_to_add= index_column_to_reduce;
 
             struct diameter_index_t_struct pivot;
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
             reduction_submatrix.append_column();
-#endif
             pivot= init_coboundary_and_get_pivot_submatrix(column_to_reduce, working_coboundary, dim, cmp_pivots);
 
             while (true) {
-#ifdef INDICATE_PROGRESS
-                //if(sub_index_column_to_reduce%2==0){
-                if (std::chrono::steady_clock::now() > next) {
-                    std::cerr<< clear_line << "reducing column " << index_column_to_reduce + 1
-                              << "/" << *h_num_columns_to_reduce << " (diameter " << diameter << ")"
-                              << std::flush;
-                    next= std::chrono::steady_clock::now() + time_step;
-                }
-#endif
-                if(pivot.index!=-1){
-
+                if(pivot.index!=-1) {
                     index_column_to_add= get_value_pivot_array_hashmap(pivot.index,cmp_pivots);
                     if(index_column_to_add!=-1) {
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
-
-                        add_coboundary_reduction_submatrix(reduction_submatrix, index_column_to_add,
-                                                           dim, working_reduction_column, working_coboundary);
-
+                        add_coboundary_reduction_submatrix(reduction_submatrix, index_column_to_add, dim, working_reduction_column, working_coboundary);
                         pivot= get_pivot(working_coboundary);
-#else
-                        add_simplex_coboundary_oblivious(h_columns_to_reduce[index_column_to_add], dim, working_coboundary);
-                        pivot= get_pivot(working_coboundary);
-#endif
-
-                    }else{
-#if defined(PRINT_PERSISTENCE_PAIRS) || defined(PYTHON_BARCODE_COLLECTION)
+                    }
+                    else{
                         value_t death= pivot.diameter;
                         if (death > diameter * ratio) {
-#ifdef INDICATE_PROGRESS
-                            std::cerr << clear_line << std::flush;
-#endif
-
-#ifdef PRINT_PERSISTENCE_PAIRS
                             std::cout << " [" << diameter << "," << death << ")" << std::endl
                                       << std::flush;
-#endif
                             birth_death_coordinate barcode = {diameter,death};
                             list_of_barcodes[dim].push_back(barcode);
                         }
-#endif
 
-#ifdef USE_PHASHMAP
                         phmap_put(pivot.index, index_column_to_reduce);
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-                        pivot_column_index[pivot.index]= index_column_to_reduce;
-#endif
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
                         while (true) {
                             diameter_index_t_struct e= pop_pivot(working_reduction_column);
                             if (e.index == -1) break;
                             reduction_submatrix.push_back(e);
                         }
-#endif
                         break;
                     }
-                } else {
-
-#ifdef PRINT_PERSISTENCE_PAIRS
-                    #ifdef INDICATE_PROGRESS
-                    std::cerr << clear_line << std::flush;
-#endif
+                }
+                else {
                     std::cout << " [" << diameter << ", )" << std::endl << std::flush;
-#endif
                     break;
                 }
             }
         }
-#ifdef INDICATE_PROGRESS
-        std::cerr << clear_line << std::flush;
-#endif
     }
-
 
     std::vector<diameter_index_t_struct> get_edges();
     void compute_barcodes();
@@ -1370,21 +1273,14 @@ template<> std::vector<diameter_index_t_struct> ripser<compressed_lower_distance
 }
 
 template <>
-void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce
-){
+void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce) {
     union_find dset(n);
 
     index_t max_num_edges= binomial_coeff(n, 2);
     struct greaterdiam_lowerindex_diameter_index_t_struct_compare_reverse cmp_reverse;
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
     cudaMemset(d_flagarray_OR_index_to_subindex, 0, sizeof(index_t)*max_num_edges);
     CUDACHECK(cudaDeviceSynchronize());
-#else
-    cudaMemset(d_flagarray, 0, sizeof(char)*max_num_edges);
-    CUDACHECK(cudaDeviceSynchronize());
-#endif
 
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, populate_edges<index_t>, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
     populate_edges<<<grid_size, 256>>>(d_flagarray_OR_index_to_subindex, d_columns_to_reduce, threshold, d_distance_matrix, max_num_edges, n, d_binomial_coeff);
@@ -1393,25 +1289,11 @@ void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vect
     *h_num_columns_to_reduce= thrust::count(thrust::device , d_flagarray_OR_index_to_subindex, d_flagarray_OR_index_to_subindex+max_num_edges, 1);
     CUDACHECK(cudaDeviceSynchronize());
     thrust::sort(thrust::device, d_columns_to_reduce, d_columns_to_reduce+ max_num_edges, cmp_reverse);
-#else
-    CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, populate_edges<char>, 256, 0));
-    grid_size  *= deviceProp.multiProcessorCount;
-    populate_edges<<<grid_size, 256>>>(d_flagarray, d_columns_to_reduce, threshold, d_distance_matrix, max_num_edges, n, d_binomial_coeff);
-    CUDACHECK(cudaDeviceSynchronize());
 
-    *h_num_columns_to_reduce= thrust::count(thrust::device , d_flagarray, d_flagarray+max_num_edges, 1);
-    CUDACHECK(cudaDeviceSynchronize());
-    thrust::sort(thrust::device, d_columns_to_reduce, d_columns_to_reduce+ max_num_edges, cmp_reverse);
-#endif
-#ifdef COUNTING
-    std::cerr<<"num edges filtered by diameter: "<<*h_num_columns_to_reduce<<std::endl;
-#endif
 
     cudaMemcpy(h_columns_to_reduce, d_columns_to_reduce, sizeof(struct diameter_index_t_struct)*(*h_num_columns_to_reduce), cudaMemcpyDeviceToHost);
 
-#ifdef PRINT_PERSISTENCE_PAIRS
     std::cout << "persistence intervals in dim 0:" << std::endl;
-#endif
 
     std::vector<index_t> vertices_of_edge(2);
     for(index_t idx=0; idx<*h_num_columns_to_reduce; idx++){
@@ -1421,68 +1303,58 @@ void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vect
         index_t u= dset.find(vertices_of_edge[0]), v= dset.find(vertices_of_edge[1]);
 
         if (u != v) {
-#if defined(PRINT_PERSISTENCE_PAIRS) || defined(PYTHON_BARCODE_COLLECTION)
             //remove paired destroyer columns (we compute cohomology)
             if(e.diameter!=0) {
-#ifdef PRINT_PERSISTENCE_PAIRS
                 std::cout << " [0," << e.diameter << ")" << std::endl;
-#endif
                 birth_death_coordinate barcode = {0,e.diameter};
                 list_of_barcodes[0].push_back(barcode);
             }
-#endif
             dset.link(u, v);
         } else {
             columns_to_reduce.push_back(e);
         }
     }
     std::reverse(columns_to_reduce.begin(), columns_to_reduce.end());
+
     //don't want to reverse the h_columns_to_reduce so just put into vector and copy later
-#pragma omp parallel for schedule(guided,1)
+    #pragma omp parallel for schedule(guided,1)
     for(index_t i=0; i<columns_to_reduce.size(); i++){
         h_columns_to_reduce[i]= columns_to_reduce[i];
     }
     *h_num_columns_to_reduce= columns_to_reduce.size();
     *h_num_nonapparent= *h_num_columns_to_reduce;//we haven't found any apparent columns yet, so set all columns to nonapparent
 
-#ifdef PRINT_PERSISTENCE_PAIRS
-    for (index_t i= 0; i < n; ++i)
-        if (dset.find(i) == i) std::cout << " [0, )" << std::endl << std::flush;
-#endif
-#ifdef COUNTING
-    std::cerr<<"num cols to reduce: dim 1, "<<*h_num_columns_to_reduce<<std::endl;
-#endif
+    for(index_t i= 0; i < n; ++i) {
+        if(dset.find(i) == i) std::cout << " [0, )" << std::endl << std::flush;
+    }
 }
 
 //finding apparent pairs
 template <>
-void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
+void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim) {
     //(need to sort for filtration order before gpuscan first, then apply gpu scan then sort again)
     //note: scan kernel can eliminate high percentage of columns in little time.
     //filter by fully reduced columns (apparent pairs) found by gpu scan
 
     //need this to prevent 0-blocks kernels from executing
-    if(*h_num_columns_to_reduce==0){
+    if(*h_num_columns_to_reduce==0) {
         return;
     }
-    index_t num_simplices= binomial_coeff(n,dim+1);
-#ifdef COUNTING
-    std::cerr<<"max possible num simplices: "<<num_simplices<<std::endl;
-#endif
-
-
-    cudaMemcpy(d_columns_to_reduce, h_columns_to_reduce,
-               sizeof(struct diameter_index_t_struct) * *h_num_columns_to_reduce, cudaMemcpyHostToDevice);
+    index_t num_simplices= binomial_coeff(n, dim+1);
+    cudaMemcpy(d_columns_to_reduce, h_columns_to_reduce, sizeof(struct diameter_index_t_struct) * *h_num_columns_to_reduce, cudaMemcpyHostToDevice);
 
     CUDACHECK(cudaDeviceSynchronize());
 
+    //@nitish
     thrust::fill(thrust::device, d_cidx_to_diameter, d_cidx_to_diameter + num_simplices, -MAX_FLOAT);
     CUDACHECK(cudaDeviceSynchronize());
 
+    //@nitish
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, init_cidx_to_diam, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
     //there will be kernel launch errors if columns_to_reduce.size()==0; it causes thrust to complain later in the code execution
 
+    //@nitish
     init_cidx_to_diam<<<grid_size, 256>>>(d_cidx_to_diameter, d_columns_to_reduce, *h_num_columns_to_reduce);
 
     CUDACHECK(cudaDeviceSynchronize());
@@ -1490,24 +1362,16 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     cudaMemset(d_lowest_one_of_apparent_pair, -1, sizeof(index_t) * *h_num_columns_to_reduce);
     CUDACHECK(cudaDeviceSynchronize());
 
-    Stopwatch sw;
-    sw.start();
+    //@nitish
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, coboundary_findapparent_single_kernel, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
 
     coboundary_findapparent_single_kernel<<<grid_size, 256, 256 * (dim + 1) * sizeof(index_t)>>>(d_cidx_to_diameter, d_columns_to_reduce, d_lowest_one_of_apparent_pair, dim, num_simplices, n, d_binomial_coeff, *h_num_columns_to_reduce, d_distance_matrix, threshold);
 
     CUDACHECK(cudaDeviceSynchronize());
-    sw.stop();
-#ifdef PROFILING
-    std::cerr<<"gpu scan kernel time for dim: "<<dim<<": "<<sw.ms()/1000.0<<"s"<<std::endl;
-#endif
-
     CUDACHECK(cudaDeviceSynchronize());
 
     //post processing (inserting appararent pairs into a "hash map": 2 level data structure) now on GPU
-    Stopwatch postprocessing;
-    postprocessing.start();
     struct row_cidx_column_idx_struct_compare cmp_pivots;
 
     //put pairs into an array
@@ -1522,15 +1386,9 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     thrust::sort(thrust::device, d_pivot_column_index_OR_nonapparent_cols, d_pivot_column_index_OR_nonapparent_cols+*h_num_nonapparent);
 
     num_apparent= *h_num_columns_to_reduce-*h_num_nonapparent;
-#ifdef COUNTING
-    std::cerr<<"num apparent for dim: "<<dim<<" is: " <<num_apparent<<std::endl;
-#endif
     //transfer to CPU side all GPU data structures
     cudaMemcpy(h_pivot_array, d_pivot_array, sizeof(index_t_pair_struct)*(num_apparent), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_pivot_column_index_array_OR_nonapparent_cols, d_pivot_column_index_OR_nonapparent_cols, sizeof(index_t)*(*h_num_nonapparent), cudaMemcpyDeviceToHost);
-
-
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
 
     cudaMemset(d_flagarray_OR_index_to_subindex, -1, sizeof(index_t)* *h_num_columns_to_reduce);
     //perform the scatter operation
@@ -1538,11 +1396,6 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     grid_size  *= deviceProp.multiProcessorCount;
     init_index_to_subindex<<<grid_size, 256>>>(d_flagarray_OR_index_to_subindex, d_pivot_column_index_OR_nonapparent_cols, *h_num_nonapparent);
     cudaMemcpy(h_flagarray_OR_index_to_subindex, d_flagarray_OR_index_to_subindex, sizeof(index_t)*(*h_num_columns_to_reduce), cudaMemcpyDeviceToHost);
-#endif
-    postprocessing.stop();
-#ifdef PROFILING
-    std::cerr<<"INSERTION POSTPROCESSING FOR GPU IN DIM "<<dim<<": "<<postprocessing.ms()/1000.0<<"s"<<std::endl;
-#endif
 }
 
 //finding apparent pairs
@@ -1626,36 +1479,18 @@ void ripser<compressed_lower_distance_matrix>::gpu_assemble_columns_to_reduce_pl
 }
 
 template <>
-void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& simplices,
-                                                                                         std::vector<diameter_index_t_struct>& columns_to_reduce,
-                                                                                         hash_map<index_t,index_t>& pivot_column_index, index_t dim){
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << "assembling columns on CPU" << std::flush;
-    std::chrono::steady_clock::time_point next= std::chrono::steady_clock::now() + time_step;
-#endif
+void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& pivot_column_index, index_t dim) {
     --dim;
     columns_to_reduce.clear();
     std::vector<struct diameter_index_t_struct> next_simplices;
 
-    for (struct diameter_index_t_struct& simplex : simplices) {
-
+    for(struct diameter_index_t_struct& simplex : simplices) {
         simplex_coboundary_enumerator cofacets(simplex, dim, *this);
-
-        while (cofacets.has_next(false)) {
-#ifdef INDICATE_PROGRESS
-            if (std::chrono::steady_clock::now() > next) {
-                       std::cerr << clear_line << "assembling " << next_simplices.size()
-                                 << " columns (processing " << std::distance(&simplices[0], &simplex)
-                                 << "/" << simplices.size() << " simplices)" << std::flush;
-                       next= std::chrono::steady_clock::now() + time_step;
-                   }
-#endif
+        while(cofacets.has_next(false)) {
             auto cofacet= cofacets.next();
-            if (cofacet.diameter <= threshold) {
-
+            if(cofacet.diameter <= threshold) {
                 next_simplices.push_back(cofacet);
-
-                if (pivot_column_index.find(cofacet.index) == pivot_column_index.end()) {
+                if(pivot_column_index.find(cofacet.index) == pivot_column_index.end()) {
                     columns_to_reduce.push_back(cofacet);
                 }
             }
@@ -1663,48 +1498,25 @@ void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_t
     }
 
     simplices.swap(next_simplices);
-
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << "sorting " << columns_to_reduce.size() << " columns"
-                     << std::flush;
-#endif
     struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
-    std::sort(columns_to_reduce.begin(), columns_to_reduce.end(),
-              cmp);
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << std::flush;
-#endif
-
+    std::sort(columns_to_reduce.begin(), columns_to_reduce.end(), cmp);
 }
 
 template <>
-void ripser<compressed_lower_distance_matrix>::assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only,std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index,
-                                                                                                 index_t dim){
-
+void ripser<compressed_lower_distance_matrix>::assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only,std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim){
     index_t max_num_simplices= binomial_coeff(n,dim+1);
     //insert all pivots from the two gpu pivot data structures into cpu_pivot_column_index, cannot parallelize this for loop due to concurrency issues of hashmaps
-    for (index_t i= 0; i < max_num_simplices; i++) {
-#ifdef USE_PHASHMAP
+    for(index_t i= 0; i < max_num_simplices; i++) {
         index_t col_idx= phmap_get_value(i);
         if(col_idx!=-1) {
             cpu_pivot_column_index[i]= col_idx;
         }
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        auto pair= pivot_column_index.find(i);
-        if(pair!=pivot_column_index.end()) {
-            cpu_pivot_column_index[i]= pair->second;
-        }
-        //}else{
-            //h_pivot_column_index_array_OR_nonapparent_cols[i]= -1;
-        //}
-#endif
     }
 
     num_apparent= *h_num_columns_to_reduce-*h_num_nonapparent;
     if(num_apparent>0) {
         //we can't insert into the hashmap in parallel
-        for (index_t i= 0; i < num_apparent; i++) {
+        for(index_t i= 0; i < num_apparent; i++) {
             index_t row_cidx= h_pivot_array[i].row_cidx;
             index_t column_idx= h_pivot_array[i].column_idx;
             if(column_idx!=-1) {
@@ -1713,61 +1525,34 @@ void ripser<compressed_lower_distance_matrix>::assemble_columns_gpu_accel_transi
         }
     }
 
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << "assembling columns" << std::flush;
-		std::chrono::steady_clock::time_point next= std::chrono::steady_clock::now() + time_step;
-#endif
     columns_to_reduce.clear();
     simplices.clear();
     index_t count_simplices= 0;
-//cpu_pivot_column_index can't be parallelized for lookup
-    for (index_t index= 0; index < max_num_simplices; ++index) {
-        value_t diameter= -MAX_FLOAT;
+    //cpu_pivot_column_index can't be parallelized for lookup
+    for(index_t index = 0; index < max_num_simplices; ++index) {
+        value_t diameter = -MAX_FLOAT;
 
         //the second condition after the || should never happen, since we never insert such pairs into cpu_pivot_column_index
-        if (cpu_pivot_column_index.find(index) == cpu_pivot_column_index.end() || cpu_pivot_column_index[index]==-1) {
+        if(cpu_pivot_column_index.find(index) == cpu_pivot_column_index.end() || cpu_pivot_column_index[index]==-1) {
             diameter= compute_diameter(index, dim);
-            if (diameter <= threshold) {
+            if(diameter <= threshold) {
                 columns_to_reduce.push_back({diameter, index});
             }
-#ifdef INDICATE_PROGRESS
-            if ((index + 1) % 1000000 == 0)
-				std::cerr << "\033[K"
-				          << "assembled " << columns_to_reduce.size() << " out of " << (index + 1)
-				          << "/" << max_num_simplices << " columns" << std::flush << "\r";
-#endif
         }
 
-        if(more_than_one_dim_cpu_only){
-            if(diameter==-MAX_FLOAT){
+        if(more_than_one_dim_cpu_only) {
+            if(diameter==-MAX_FLOAT) {
                 diameter= compute_diameter(index, dim);
             }
-            if(diameter<=threshold){
+            if(diameter<=threshold) {
                 simplices.push_back({diameter,index});
                 count_simplices++;
             }
         }
     }
-#ifdef COUNTING
-    if(more_than_one_dim_cpu_only){
-        std::cerr<<"(if there are multiple dimensions needed to compute) num simplices for dim: "<<dim<<" is: "<<count_simplices<<std::endl;
-    }
-#endif
-#ifdef INDICATE_PROGRESS
-    std::cerr << "\033[K"
-	          << "sorting " << columns_to_reduce.size() << " columns" << std::flush << "\r";
-#endif
+
     greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
     std::sort(columns_to_reduce.begin(), columns_to_reduce.end(), cmp);
-
-#ifdef COUNTING
-    std::cerr<<"NUM COLS to reduce for CPU: "<<columns_to_reduce.size()<<std::endl;
-#endif
-
-#ifdef INDICATE_PROGRESS
-    std::cerr << clear_line << std::flush;
-#endif
-
 }
 
 template <>
@@ -1786,14 +1571,12 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
         }
 
         CUDACHECK(cudaMalloc((void **) &d_cidx_to_diameter, sizeof(value_t)*max_num_simplices_forall_dims));
-#if defined(ASSEMBLE_REDUCTION_SUBMATRIX)
         CUDACHECK(cudaMalloc((void **) &d_flagarray_OR_index_to_subindex, sizeof(index_t)*max_num_simplices_forall_dims));
 
         h_flagarray_OR_index_to_subindex = (index_t*) malloc(sizeof(index_t)*max_num_simplices_forall_dims);
         if(h_flagarray_OR_index_to_subindex == nullptr) {
             std::cerr<<"malloc for h_index_to_subindex failed"<<std::endl;
         }
-#endif
         CUDACHECK(cudaMalloc((void **) &d_distance_matrix, sizeof(value_t)*dist.size()*(dist.size()-1)/2));
         cudaMemcpy(d_distance_matrix, dist.distances.data(), sizeof(value_t)*dist.size()*(dist.size()-1)/2, cudaMemcpyHostToDevice);
 
@@ -1842,15 +1625,9 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
 
     index_t dim_forgpuscan = 1;
     for(index_t dim = 1; dim <= gpu_dim_max; ++dim) {
-#ifdef USE_PHASHMAP
         phmap_clear();
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        pivot_column_index.clear();
-        pivot_column_index.resize(*h_num_columns_to_reduce);
-#endif
-        *h_num_nonapparent= 0;
 
+        *h_num_nonapparent= 0;
         //search for apparent pairs
         gpuscan(dim);
         //dim_forgpuscan= dim;//update dim_forgpuscan to the dimension that gpuscan was just done at
@@ -1861,23 +1638,18 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
     }
 
     if(gpu_dim_max < dim_max) {//do cpu only computation from this point on
-#ifdef CPUONLY_SPARSE_HASHMAP
-        std::cerr<<"MEMORY EFFICIENT/BUT TIME INEFFICIENT CPU-ONLY MODE FOR REMAINDER OF HIGH DIMENSIONAL COMPUTATION (NOT ENOUGH GPU DEVICE MEMORY)"<<std::endl;
-#endif
-#ifndef CPUONLY_SPARSE_HASHMAP
         std::cerr<<"CPU-ONLY MODE FOR REMAINDER OF HIGH DIMENSIONAL COMPUTATION (NOT ENOUGH GPU DEVICE MEMORY)"<<std::endl;
-#endif
         free_init_cpumem();
         hash_map<index_t,index_t> cpu_pivot_column_index;
         cpu_pivot_column_index.reserve(*h_num_columns_to_reduce);
-        bool more_than_one_dim_to_compute= dim_max>gpu_dim_max+1;
+        bool more_than_one_dim_to_compute = dim_max>gpu_dim_max+1;
         assemble_columns_gpu_accel_transition_to_cpu_only(more_than_one_dim_to_compute, simplices, columns_to_reduce, cpu_pivot_column_index, gpu_dim_max+1);
         free_remaining_cpumem();
         for(index_t dim = gpu_dim_max+1; dim <= dim_max; ++dim) {
             cpu_pivot_column_index.clear();
             cpu_pivot_column_index.reserve(columns_to_reduce.size());
             compute_pairs(columns_to_reduce, cpu_pivot_column_index, dim);
-            if(dim<dim_max){
+            if(dim<dim_max) {
                 cpu_byneighbor_assemble_columns_to_reduce(simplices, columns_to_reduce, cpu_pivot_column_index, dim+1);
             }
         }
@@ -1888,17 +1660,14 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
             free_remaining_cpumem();
         }
     }
+
     if(gpu_dim_max>=1 && n>=10) {
         free_gpumem_dense_computation();
         cudaFreeHost(h_num_columns_to_reduce);
         cudaFreeHost(h_num_nonapparent);
-#if defined(ASSEMBLE_REDUCTION_SUBMATRIX)
         free(h_flagarray_OR_index_to_subindex);
-#endif
     }
 }
-
-
 
 template <typename T> T read(std::istream& s) {
     T result;
@@ -2030,7 +1799,5 @@ int main(int argc, char** argv) {
 
     if(threshold == std::numeric_limits<value_t>::max()) threshold = enclosing_radius;
 
-
     ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
-
 }
