@@ -99,3 +99,25 @@ endif()
 
 
 #target_link_libraries(ripser++ phmap)
+
+include(FetchContent)
+if(NOT Hedgehog_INCLUDE_DIR)
+    # Hedgehog 3.0
+    FetchContent_Declare(Hedgehog
+        GIT_REPOSITORY https://github.com/usnistgov/hedgehog.git
+        GIT_TAG        master
+    )
+    FetchContent_MakeAvailable(Hedgehog)
+
+    # Need to set variable Hedgehog_INCLUDE_DIR to the downloaded hedgehog src code
+    set(Hedgehog_INCLUDE_DIR "${hedgehog_SOURCE_DIR}" CACHE STRING "${hedgehog_SOURCE_DIR}" FORCE)
+endif(NOT Hedgehog_INCLUDE_DIR)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake-modules")
+find_package(Hedgehog REQUIRED)
+
+cuda_add_library(ripser_lib ripser.cu ripser.h)
+
+add_executable(ripser_hedgehog ripser_hedgehog.cpp ripser.h)
+target_compile_definitions(ripser_hedgehog PUBLIC PRINT_PERSISTENCE_PAIRS)
+target_include_directories(ripser_hedgehog PUBLIC ${Hedgehog_INCLUDE_DIRS})
+target_link_libraries(ripser_hedgehog PUBLIC ripser_lib ${Hedgehog_LIBRARIES})
