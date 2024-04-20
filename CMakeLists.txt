@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.2)
 project(pyripser++)
+set(CMAKE_CXX_STANDARD 20)
 
 find_package(CUDA 7 REQUIRED)
 
@@ -114,6 +115,8 @@ if(NOT Hedgehog_INCLUDE_DIR)
 endif(NOT Hedgehog_INCLUDE_DIR)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake-modules")
 find_package(Hedgehog REQUIRED)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fconcepts")
 
 cuda_add_library(ripser_lib ripser.cu ripser.h)
 
