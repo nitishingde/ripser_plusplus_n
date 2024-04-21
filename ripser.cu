@@ -56,13 +56,7 @@
 #define ASSEMBLE_REDUCTION_SUBMATRIX//do submatrix reduction with the sparse coefficient submatrix of V
 //#define PROFILING
 //#define COUNTING
-#define USE_PHASHMAP//www.github.com/greg7mdp/parallel-hashmap
 #define PYTHON_BARCODE_COLLECTION
-#ifndef USE_PHASHMAP
-#define USE_GOOGLE_HASHMAP
-#endif
-
-//#define CPUONLY_SPARSE_HASHMAP//WARNING: MAY NEED LOWER GCC VERSION TO RUN, TESTED ON: NVCC VERSION 9.2 WITH GCC VERSIONS >=5.3.0 AND <=7.3.0
 
 #define MIN_INT64 (-9223372036854775807-1)
 #define MAX_INT64 (9223372036854775807)
@@ -90,17 +84,7 @@
 #include <thrust/unique.h>
 #include <thrust/sort.h>
 #include <cuda_runtime.h>
-#ifdef CPUONLY_SPARSE_HASHMAP
-#include <sparsehash/sparse_hash_map>
-template <class Key, class T> class hash_map : public google::sparse_hash_map<Key, T> {
-public:
-    explicit hash_map() : google::sparse_hash_map<Key, T>() {
-        }
-    inline void reserve(size_t hint) { this->resize(hint); }
-};
-#endif
 
-#ifndef CPUONLY_SPARSE_HASHMAP
 template <class Key, class T> class hash_map : public google::dense_hash_map<Key, T> {
 public:
     explicit hash_map() : google::dense_hash_map<Key, T>() {
@@ -108,7 +92,6 @@ public:
     }
     inline void reserve(size_t hint) { this->resize(hint); }
 };
-#endif
 
 #ifdef INDICATE_PROGRESS
 static const std::chrono::milliseconds time_step(40);
@@ -1844,14 +1827,8 @@ public:
     void assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only, std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim);
 
     index_t get_value_pivot_array_hashmap(index_t row_cidx, struct row_cidx_column_idx_struct_compare cmp){
-#ifdef USE_PHASHMAP
         index_t col_idx= phmap_get_value(row_cidx);
         if(col_idx==-1){
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-            auto pair= pivot_column_index.find(row_cidx);
-        if(pair==pivot_column_index.end()){
-#endif
             index_t first= 0;
             index_t last= num_apparent- 1;
 
@@ -1870,12 +1847,7 @@ public:
 
         }else{
 
-#ifdef USE_PHASHMAP
             return col_idx;
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-            return pair->second;
-#endif
         }
     }
 
@@ -2189,12 +2161,7 @@ public:
                         }
 #endif
 
-#ifdef USE_PHASHMAP
                         phmap_put(pivot.index, index_column_to_reduce);
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-                        pivot_column_index[pivot.index]= index_column_to_reduce;
-#endif
 #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
                         while (true) {
                             diameter_index_t_struct e= pop_pivot(working_reduction_column);
@@ -2704,17 +2671,7 @@ void ripser<compressed_lower_distance_matrix>::gpu_assemble_columns_to_reduce_pl
 
 #pragma omp parallel for schedule(guided,1)
     for (index_t i= 0; i < max_num_simplices; i++) {
-#ifdef USE_PHASHMAP
         h_pivot_column_index_array_OR_nonapparent_cols[i]= phmap_get_value(i);
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        auto pair= pivot_column_index.find(i);
-        if(pair!=pivot_column_index.end()){
-            h_pivot_column_index_array_OR_nonapparent_cols[i]= pair->second;
-        }else{
-            h_pivot_column_index_array_OR_nonapparent_cols[i]= -1;
-        }
-#endif
     }
     num_apparent= *h_num_columns_to_reduce-*h_num_nonapparent;
     if(num_apparent>0) {
@@ -2978,21 +2935,10 @@ void ripser<compressed_lower_distance_matrix>::assemble_columns_gpu_accel_transi
     index_t max_num_simplices= binomial_coeff(n,dim+1);
     //insert all pivots from the two gpu pivot data structures into cpu_pivot_column_index, cannot parallelize this for loop due to concurrency issues of hashmaps
     for (index_t i= 0; i < max_num_simplices; i++) {
-#ifdef USE_PHASHMAP
         index_t col_idx= phmap_get_value(i);
         if(col_idx!=-1) {
             cpu_pivot_column_index[i]= col_idx;
         }
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        auto pair= pivot_column_index.find(i);
-        if(pair!=pivot_column_index.end()) {
-            cpu_pivot_column_index[i]= pair->second;
-        }
-        //}else{
-            //h_pivot_column_index_array_OR_nonapparent_cols[i]= -1;
-        //}
-#endif
     }
 
     num_apparent= *h_num_columns_to_reduce-*h_num_nonapparent;
@@ -3169,13 +3115,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
     for (index_t dim= 1; dim <= gpu_dim_max; ++dim) {
         Stopwatch sw;
         sw.start();
-#ifdef USE_PHASHMAP
         phmap_clear();
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        pivot_column_index.clear();
-            pivot_column_index.resize(*h_num_columns_to_reduce);
-#endif
         *h_num_nonapparent= 0;
 
         //search for apparent pairs
@@ -3210,12 +3150,7 @@ void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
         std::cerr<<"GPU ACCELERATED COMPUTATION from dim 0 to dim "<<gpu_dim_max<<": "<<gpu_accel_timer.ms()/1000.0<<"s"<<std::endl;
 #endif
     if(dim_max>gpu_dim_max){//do cpu only computation from this point on
-#ifdef CPUONLY_SPARSE_HASHMAP
-        std::cerr<<"MEMORY EFFICIENT/BUT TIME INEFFICIENT CPU-ONLY MODE FOR REMAINDER OF HIGH DIMENSIONAL COMPUTATION (NOT ENOUGH GPU DEVICE MEMORY)"<<std::endl;
-#endif
-#ifndef CPUONLY_SPARSE_HASHMAP
         std::cerr<<"CPU-ONLY MODE FOR REMAINDER OF HIGH DIMENSIONAL COMPUTATION (NOT ENOUGH GPU DEVICE MEMORY)"<<std::endl;
-#endif
         free_init_cpumem();
         hash_map<index_t,index_t> cpu_pivot_column_index;
         cpu_pivot_column_index.reserve(*h_num_columns_to_reduce);
@@ -3407,13 +3342,7 @@ void ripser<sparse_distance_matrix>::compute_barcodes() {
     for (index_t dim = 1; dim <= dim_max; ++dim) {
         Stopwatch sw;
         sw.start();
-#ifdef USE_PHASHMAP
         phmap_clear();
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-        pivot_column_index.clear();
-            pivot_column_index.resize(*h_num_columns_to_reduce);
-#endif
         *h_num_nonapparent = 0;
 
         gpuscan(dim);
