@@ -2514,8 +2514,7 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     grid_size  *= deviceProp.multiProcessorCount;
     //there will be kernel launch errors if columns_to_reduce.size()==0; it causes thrust to complain later in the code execution
 
-    init_cidx_to_diam << < grid_size, 256 >> >
-    (d_cidx_to_diameter, d_columns_to_reduce, *h_num_columns_to_reduce);
+    init_cidx_to_diam<<<grid_size, 256>>>(d_cidx_to_diameter, d_columns_to_reduce, *h_num_columns_to_reduce);
 
     CUDACHECK(cudaDeviceSynchronize());
 
@@ -2527,8 +2526,7 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, coboundary_findapparent_single_kernel, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
 
-    coboundary_findapparent_single_kernel << < grid_size, 256, 256 * (dim + 1) * sizeof(index_t) >> >
-    (d_cidx_to_diameter, d_columns_to_reduce, d_lowest_one_of_apparent_pair, dim, num_simplices, n, d_binomial_coeff, *h_num_columns_to_reduce, d_distance_matrix, threshold);
+    coboundary_findapparent_single_kernel<<<grid_size, 256, 256 * (dim + 1) * sizeof(index_t)>>>(d_cidx_to_diameter, d_columns_to_reduce, d_lowest_one_of_apparent_pair, dim, num_simplices, n, d_binomial_coeff, *h_num_columns_to_reduce, d_distance_matrix, threshold);
 
     CUDACHECK(cudaDeviceSynchronize());
     sw.stop();
@@ -2548,7 +2546,7 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, gpu_insert_pivots_kernel, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
 
-    gpu_insert_pivots_kernel<< < grid_size, 256 >> >(d_pivot_array, d_lowest_one_of_apparent_pair, d_pivot_column_index_OR_nonapparent_cols, *h_num_columns_to_reduce, d_num_nonapparent);
+    gpu_insert_pivots_kernel<<<grid_size, 256>>>(d_pivot_array, d_lowest_one_of_apparent_pair, d_pivot_column_index_OR_nonapparent_cols, *h_num_columns_to_reduce, d_num_nonapparent);
     CUDACHECK(cudaDeviceSynchronize());
 
     thrust::sort(thrust::device, d_pivot_array, d_pivot_array+*h_num_columns_to_reduce, cmp_pivots);
@@ -2569,8 +2567,7 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim){
     //perform the scatter operation
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, init_index_to_subindex, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
-    init_index_to_subindex<< < grid_size, 256 >> >
-    (d_flagarray_OR_index_to_subindex, d_pivot_column_index_OR_nonapparent_cols, *h_num_nonapparent);
+    init_index_to_subindex<<<grid_size, 256>>>(d_flagarray_OR_index_to_subindex, d_pivot_column_index_OR_nonapparent_cols, *h_num_nonapparent);
     cudaMemcpy(h_flagarray_OR_index_to_subindex, d_flagarray_OR_index_to_subindex, sizeof(index_t)*(*h_num_columns_to_reduce), cudaMemcpyDeviceToHost);
 #endif
     postprocessing.stop();
@@ -2614,8 +2611,7 @@ void ripser<sparse_distance_matrix>::gpuscan(const index_t dim){
     sw.start();
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, coboundary_findapparent_sparse_single_kernel, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
-    coboundary_findapparent_sparse_single_kernel << < grid_size, 256, 256 * (dim + 1) * sizeof(index_t) >> >
-    (d_cidx_diameter_pairs_sortedlist, d_columns_to_reduce, d_lowest_one_of_apparent_pair, dim, n, d_binomial_coeff, *h_num_columns_to_reduce, d_CSR_distance_matrix, threshold);
+    coboundary_findapparent_sparse_single_kernel<<<grid_size, 256, 256 * (dim + 1) * sizeof(index_t)>>>(d_cidx_diameter_pairs_sortedlist, d_columns_to_reduce, d_lowest_one_of_apparent_pair, dim, n, d_binomial_coeff, *h_num_columns_to_reduce, d_CSR_distance_matrix, threshold);
 
     CUDACHECK(cudaDeviceSynchronize());
     sw.stop();
@@ -2633,7 +2629,7 @@ void ripser<sparse_distance_matrix>::gpuscan(const index_t dim){
 
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, gpu_insert_pivots_kernel, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
-    gpu_insert_pivots_kernel<< < grid_size, 256 >> >(d_pivot_array, d_lowest_one_of_apparent_pair, d_pivot_column_index_OR_nonapparent_cols, *h_num_columns_to_reduce, d_num_nonapparent);
+    gpu_insert_pivots_kernel<<<grid_size, 256>>>(d_pivot_array, d_lowest_one_of_apparent_pair, d_pivot_column_index_OR_nonapparent_cols, *h_num_columns_to_reduce, d_num_nonapparent);
     CUDACHECK(cudaDeviceSynchronize());
     thrust::sort(thrust::device, d_pivot_array, d_pivot_array+*h_num_columns_to_reduce, cmp_pivots);
     thrust::sort(thrust::device, d_pivot_column_index_OR_nonapparent_cols, d_pivot_column_index_OR_nonapparent_cols+*h_num_nonapparent);
@@ -2651,8 +2647,7 @@ void ripser<sparse_distance_matrix>::gpuscan(const index_t dim){
     //perform the scatter operation
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor( &grid_size, init_index_to_subindex, 256, 0));
     grid_size  *= deviceProp.multiProcessorCount;
-    init_index_to_subindex<< < grid_size, 256 >> >
-    (d_flagarray_OR_index_to_subindex, d_pivot_column_index_OR_nonapparent_cols, *h_num_nonapparent);
+    init_index_to_subindex<<<grid_size, 256>>>(d_flagarray_OR_index_to_subindex, d_pivot_column_index_OR_nonapparent_cols, *h_num_nonapparent);
     cudaMemcpy(h_flagarray_OR_index_to_subindex, d_flagarray_OR_index_to_subindex, sizeof(index_t)*(*h_num_columns_to_reduce), cudaMemcpyDeviceToHost);
 #endif
     postprocessing.stop();
