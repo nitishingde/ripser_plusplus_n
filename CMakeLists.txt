@@ -101,6 +101,14 @@ endif()
 
 #target_link_libraries(ripser++ phmap)
 
+cuda_add_executable(ripser++
+    ripserplusplus/ripser++.cu
+    ripserplusplus/include/phmap_interface/phmap_interface.cpp
+    ripserplusplus/include/profiling/stopwatch.h
+)
+target_include_directories(ripser++ PUBLIC ${CMAKE_SOURCE_DIR}/ripserplusplus/include)
+target_compile_definitions(ripser++ PUBLIC PRINT_PERSISTENCE_PAIRS)
+
 include(FetchContent)
 if(NOT Hedgehog_INCLUDE_DIR)
     # Hedgehog 3.0
