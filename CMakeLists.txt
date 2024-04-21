@@ -126,7 +126,11 @@ find_package(Hedgehog REQUIRED)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fconcepts")
 
-cuda_add_library(ripser_lib ripser.cu ripser.h)
+cuda_add_library(ripser_lib ripser.cu ripser.h
+    ripserplusplus/include/phmap_interface/phmap_interface.cpp
+    ripserplusplus/include/profiling/stopwatch.h
+)
+target_include_directories(ripser_lib PUBLIC ${CMAKE_SOURCE_DIR}/ripserplusplus/include)
 
 add_executable(ripser_hedgehog ripser_hedgehog.cpp ripser.h)
 target_compile_definitions(ripser_hedgehog PUBLIC PRINT_PERSISTENCE_PAIRS)
