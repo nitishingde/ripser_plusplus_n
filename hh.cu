@@ -715,8 +715,8 @@ __global__ void coboundary_findapparent_single_kernel(value_t* d_cidx_to_diamete
     }
 }
 
-template <typename DistanceMatrix> class ripser {
-    DistanceMatrix dist;//this can be either sparse or compressed
+class ripser {
+    compressed_lower_distance_matrix dist;//this can be either sparse or compressed
 
     index_t n, dim_max;//n is the number of points, dim_max is the max dimension to compute PH
     value_t threshold;//this truncates the filtration by removing simplices too large. low values of threshold should use --sparse option
@@ -774,7 +774,7 @@ private:
     std::vector<struct diameter_index_t_struct> columns_to_reduce;
 public:
 
-    ripser(DistanceMatrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio)
+    ripser(compressed_lower_distance_matrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio)
             : dist(std::move(_dist)), n(dist.size()),
               dim_max(std::min(_dim_max, index_t(dist.size() - 2))), threshold(_threshold),
               ratio(_ratio), binomial_coeff(n, dim_max + 2) {}
@@ -1017,84 +1017,20 @@ public:
     void gpuscan(const index_t dim);
 
     template <typename Column>
-    diameter_index_t_struct init_coboundary_and_get_pivot_fullmatrix(const diameter_index_t_struct simplex,
-                                                                     Column& working_coboundary, const index_t& dim
-            , hash_map<index_t, index_t>& pivot_column_index) {
-        bool check_for_emergent_pair= true;
-        cofacet_entries.clear();
-        simplex_coboundary_enumerator cofacets(simplex, dim, *this);
-        while (cofacets.has_next()) {
-            diameter_index_t_struct cofacet= cofacets.next();
-            if (cofacet.diameter <= threshold) {
-                cofacet_entries.push_back(cofacet);
-                if (check_for_emergent_pair && (simplex.diameter == cofacet.diameter)) {
-                    if (pivot_column_index.find(cofacet.index) == pivot_column_index.end()){
-                        return cofacet;
-                    }
-                    check_for_emergent_pair= false;
-                }
-            }
-        }
-        for (auto cofacet : cofacet_entries) working_coboundary.push(cofacet);
-        return get_pivot(working_coboundary);
-    }
+    diameter_index_t_struct init_coboundary_and_get_pivot_fullmatrix(const diameter_index_t_struct simplex, Column& working_coboundary, const index_t& dim, hash_map<index_t, index_t>& pivot_column_index);
 
     template <typename Column>
-    diameter_index_t_struct init_coboundary_and_get_pivot_submatrix(const diameter_index_t_struct simplex,
-                                                                    Column& working_coboundary, index_t dim, struct row_cidx_column_idx_struct_compare cmp) {
-        bool check_for_emergent_pair= true;
-        cofacet_entries.clear();
-        simplex_coboundary_enumerator cofacets(simplex, dim, *this);
-        while (cofacets.has_next()) {
-            diameter_index_t_struct cofacet= cofacets.next();
-            if (cofacet.diameter <= threshold) {
-                cofacet_entries.push_back(cofacet);
-                if (check_for_emergent_pair && (simplex.diameter == cofacet.diameter)) {
-                    if(get_value_pivot_array_hashmap(cofacet.index, cmp)==-1) {
-                        return cofacet;
-                    }
-                    check_for_emergent_pair= false;
-                }
-            }
-        }
-        for (auto cofacet : cofacet_entries) working_coboundary.push(cofacet);
-        return get_pivot(working_coboundary);
-    }
+    diameter_index_t_struct init_coboundary_and_get_pivot_submatrix(const diameter_index_t_struct simplex, Column& working_coboundary, index_t dim, struct row_cidx_column_idx_struct_compare cmp);
 
     template <typename Column>
-    void add_simplex_coboundary_oblivious(const diameter_index_t_struct simplex, const index_t& dim,
-                                          Column& working_coboundary) {
-        simplex_coboundary_enumerator cofacets(simplex, dim, *this);
-        while (cofacets.has_next()) {
-            diameter_index_t_struct cofacet= cofacets.next();
-            if (cofacet.diameter <= threshold) working_coboundary.push(cofacet);
-        }
-    }
+    void add_simplex_coboundary_oblivious(const diameter_index_t_struct simplex, const index_t& dim, Column& working_coboundary);
 
     template <typename Column>
-    void add_simplex_coboundary_use_reduction_column(const diameter_index_t_struct simplex, const index_t& dim,
-                                                     Column& working_reduction_column, Column& working_coboundary) {
-        working_reduction_column.push(simplex);
-        simplex_coboundary_enumerator cofacets(simplex, dim, *this);
-        while (cofacets.has_next()) {
-            diameter_index_t_struct cofacet= cofacets.next();
-            if (cofacet.diameter <= threshold) working_coboundary.push(cofacet);
-        }
-    }
+    void add_simplex_coboundary_use_reduction_column(const diameter_index_t_struct simplex, const index_t& dim, Column& working_reduction_column, Column& working_coboundary);
 
     //THIS IS THE METHOD TO CALL FOR CPU SIDE FULL MATRIX REDUCTION
     template <typename Column>
-    void add_coboundary_fullmatrix(compressed_sparse_matrix<diameter_index_t_struct>& reduction_matrix,
-                                   const std::vector<diameter_index_t_struct>& columns_to_reduce,
-                                   const size_t index_column_to_add, const size_t& dim,
-                                   Column& working_reduction_column, Column& working_coboundary) {
-        diameter_index_t_struct column_to_add= columns_to_reduce[index_column_to_add];
-        add_simplex_coboundary_use_reduction_column(column_to_add, dim, working_reduction_column, working_coboundary);
-
-        for (diameter_index_t_struct simplex : reduction_matrix.subrange(index_column_to_add)) {
-            add_simplex_coboundary_use_reduction_column(simplex, dim, working_reduction_column, working_coboundary);
-        }
-    }
+    void add_coboundary_fullmatrix(compressed_sparse_matrix<diameter_index_t_struct>& reduction_matrix, const std::vector<diameter_index_t_struct>& columns_to_reduce, const size_t index_column_to_add, const size_t& dim, Column& working_reduction_column, Column& working_coboundary);
 
     //THIS IS THE METHOD TO CALL FOR SUBMATRIX REDUCTION ON CPU SIDE
 #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
@@ -1220,9 +1156,7 @@ public:
     void compute_barcodes();
 };
 
-
-template<>
-class ripser<compressed_lower_distance_matrix>::simplex_coboundary_enumerator {
+class ripser::simplex_coboundary_enumerator {
 private:
     index_t idx_below, idx_above, v, k;
     std::vector<index_t> vertices;
@@ -1235,7 +1169,7 @@ public:
 
     simplex_coboundary_enumerator(
             const struct diameter_index_t_struct _simplex, index_t _dim,
-            const ripser<compressed_lower_distance_matrix>& parent)
+            const ripser& parent)
             : idx_below(_simplex.index),
               idx_above(0), v(parent.n - 1), k(_dim + 1),
               vertices(_dim + 1), simplex(_simplex), dist(parent.dist),
@@ -1263,7 +1197,68 @@ public:
     }
 };
 
-template<> std::vector<diameter_index_t_struct> ripser<compressed_lower_distance_matrix>::get_edges() {
+template <typename Column>
+diameter_index_t_struct ripser::init_coboundary_and_get_pivot_fullmatrix(const diameter_index_t_struct simplex, Column& working_coboundary, const index_t& dim, hash_map<index_t, index_t>& pivot_column_index) {
+    bool check_for_emergent_pair= true;
+    cofacet_entries.clear();
+    ripser::simplex_coboundary_enumerator cofacets(simplex, dim, *this);
+    while (cofacets.has_next()) {
+        diameter_index_t_struct cofacet= cofacets.next();
+        if (cofacet.diameter <= threshold) {
+            cofacet_entries.push_back(cofacet);
+            if (check_for_emergent_pair && (simplex.diameter == cofacet.diameter)) {
+                if (pivot_column_index.find(cofacet.index) == pivot_column_index.end()){
+                    return cofacet;
+                }
+                check_for_emergent_pair= false;
+            }
+        }
+    }
+    for (auto cofacet : cofacet_entries) working_coboundary.push(cofacet);
+    return get_pivot(working_coboundary);
+}
+
+template <typename Column>
+diameter_index_t_struct ripser::init_coboundary_and_get_pivot_submatrix(const diameter_index_t_struct simplex, Column& working_coboundary, index_t dim, struct row_cidx_column_idx_struct_compare cmp) {
+    bool check_for_emergent_pair= true;
+    cofacet_entries.clear();
+    ripser::simplex_coboundary_enumerator cofacets(simplex, dim, *this);
+    while (cofacets.has_next()) {
+        diameter_index_t_struct cofacet= cofacets.next();
+        if (cofacet.diameter <= threshold) {
+            cofacet_entries.push_back(cofacet);
+            if (check_for_emergent_pair && (simplex.diameter == cofacet.diameter)) {
+                if(get_value_pivot_array_hashmap(cofacet.index, cmp)==-1) {
+                    return cofacet;
+                }
+                check_for_emergent_pair= false;
+            }
+        }
+    }
+    for (auto cofacet : cofacet_entries) working_coboundary.push(cofacet);
+    return get_pivot(working_coboundary);
+}
+
+template <typename Column>
+void ripser::add_simplex_coboundary_oblivious(const diameter_index_t_struct simplex, const index_t& dim, Column& working_coboundary) {
+    ripser::simplex_coboundary_enumerator cofacets(simplex, dim, *this);
+    while (cofacets.has_next()) {
+        diameter_index_t_struct cofacet= cofacets.next();
+        if (cofacet.diameter <= threshold) working_coboundary.push(cofacet);
+    }
+}
+
+template <typename Column>
+void ripser::add_simplex_coboundary_use_reduction_column(const diameter_index_t_struct simplex, const index_t& dim, Column& working_reduction_column, Column& working_coboundary) {
+    working_reduction_column.push(simplex);
+    ripser::simplex_coboundary_enumerator cofacets(simplex, dim, *this);
+    while (cofacets.has_next()) {
+        diameter_index_t_struct cofacet= cofacets.next();
+        if (cofacet.diameter <= threshold) working_coboundary.push(cofacet);
+    }
+}
+
+std::vector<diameter_index_t_struct> ripser::get_edges() {
     std::vector<diameter_index_t_struct> edges;
     for (index_t index= binomial_coeff(n, 2); index-- > 0;) {
         value_t diameter= compute_diameter(index, 1);
@@ -1272,8 +1267,7 @@ template<> std::vector<diameter_index_t_struct> ripser<compressed_lower_distance
     return edges;
 }
 
-template <>
-void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce) {
+void ripser::gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce) {
     union_find dset(n);
 
     index_t max_num_edges= binomial_coeff(n, 2);
@@ -1330,8 +1324,7 @@ void ripser<compressed_lower_distance_matrix>::gpu_compute_dim_0_pairs(std::vect
 }
 
 //finding apparent pairs
-template <>
-void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim) {
+void ripser::gpuscan(const index_t dim) {
     //(need to sort for filtration order before gpuscan first, then apply gpu scan then sort again)
     //note: scan kernel can eliminate high percentage of columns in little time.
     //filter by fully reduced columns (apparent pairs) found by gpu scan
@@ -1399,9 +1392,7 @@ void ripser<compressed_lower_distance_matrix>::gpuscan(const index_t dim) {
 }
 
 //finding apparent pairs
-
-template <>
-void ripser<compressed_lower_distance_matrix>::gpu_assemble_columns_to_reduce_plusplus(const index_t dim) {
+void ripser::gpu_assemble_columns_to_reduce_plusplus(const index_t dim) {
 
     index_t max_num_simplices= binomial_coeff(n, dim + 1);
 
@@ -1478,8 +1469,7 @@ void ripser<compressed_lower_distance_matrix>::gpu_assemble_columns_to_reduce_pl
 
 }
 
-template <>
-void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& pivot_column_index, index_t dim) {
+void ripser::cpu_byneighbor_assemble_columns_to_reduce(std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& pivot_column_index, index_t dim) {
     --dim;
     columns_to_reduce.clear();
     std::vector<struct diameter_index_t_struct> next_simplices;
@@ -1502,8 +1492,7 @@ void ripser<compressed_lower_distance_matrix>::cpu_byneighbor_assemble_columns_t
     std::sort(columns_to_reduce.begin(), columns_to_reduce.end(), cmp);
 }
 
-template <>
-void ripser<compressed_lower_distance_matrix>::assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only,std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim){
+void ripser::assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only,std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim){
     index_t max_num_simplices= binomial_coeff(n,dim+1);
     //insert all pivots from the two gpu pivot data structures into cpu_pivot_column_index, cannot parallelize this for loop due to concurrency issues of hashmaps
     for(index_t i= 0; i < max_num_simplices; i++) {
@@ -1555,8 +1544,7 @@ void ripser<compressed_lower_distance_matrix>::assemble_columns_gpu_accel_transi
     std::sort(columns_to_reduce.begin(), columns_to_reduce.end(), cmp);
 }
 
-template <>
-void ripser<compressed_lower_distance_matrix>::compute_barcodes() {
+void ripser::compute_barcodes() {
     index_t gpu_dim_max = calculate_gpu_dim_max_for_fullrips_computation_from_memory(dim_max, true);
 
     max_num_simplices_forall_dims= gpu_dim_max<(n/2)-1?get_num_simplices_for_dim(gpu_dim_max): get_num_simplices_for_dim((n/2)-1);
@@ -1799,5 +1787,5 @@ int main(int argc, char** argv) {
 
     if(threshold == std::numeric_limits<value_t>::max()) threshold = enclosing_radius;
 
-    ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
+    ripser(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
 }
