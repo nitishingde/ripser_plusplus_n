@@ -146,11 +146,6 @@ typedef struct{
     set_of_barcodes* all_barcodes;
 } ripser_plusplus_result;
 
-ripser_plusplus_result res;
-
-
-std::vector<std::vector<birth_death_coordinate>> list_of_barcodes = std::vector<std::vector<birth_death_coordinate>>();
-
 struct row_cidx_column_idx_struct_compare{
     __host__ __device__ bool operator()(struct index_t_pair_struct a, struct index_t_pair_struct b){
         //return a.row_cidx!=b.row_cidx ? a.row_cidx<b.row_cidx : a.column_idx<b.column_idx;//the second condition should never happen if sorting pivot pairs since pivots do not conflict on rows or columns
@@ -772,6 +767,7 @@ private:
     struct index_t_pair_struct* d_pivot_array;//sorted array of all pivots, substitute for a structured hashmap with lookup done by log(n) binary search
     struct index_t_pair_struct* h_pivot_array;//sorted array of all pivots
     std::vector<struct diameter_index_t_struct> columns_to_reduce;
+    std::vector<std::vector<birth_death_coordinate>> list_of_barcodes;
 public:
 
     explicit ripser(compressed_lower_distance_matrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio);
@@ -858,7 +854,11 @@ public:
 };
 
 ripser::ripser(compressed_lower_distance_matrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio)
-    : dist(std::move(_dist)), n(dist.size()), dim_max(std::min(_dim_max, index_t(dist.size() - 2))), threshold(_threshold), ratio(_ratio), binomial_coeff(n, dim_max + 2) {}
+    : dist(std::move(_dist)), n(dist.size()), dim_max(std::min(_dim_max, index_t(dist.size() - 2))), threshold(_threshold), ratio(_ratio), binomial_coeff(n, dim_max + 2) {
+    for(index_t i = 0; i <= dim_max; i++) {
+        list_of_barcodes.push_back(std::vector<birth_death_coordinate>());
+    }
+}
 
 void ripser::free_gpumem_dense_computation() {
     if (n>=10) {//this fixes a bug for single point persistence being called repeatedly
@@ -1764,11 +1764,6 @@ int main(int argc, char** argv) {
             if (filename) { print_usage_and_exit(-1); }
             filename= argv[i];
         }
-    }
-
-    list_of_barcodes = std::vector<std::vector<birth_death_coordinate>>();
-    for(index_t i = 0; i <= dim_max; i++) {
-        list_of_barcodes.push_back(std::vector<birth_death_coordinate>());
     }
 
     std::ifstream file_stream(filename);
