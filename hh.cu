@@ -774,384 +774,44 @@ private:
     std::vector<struct diameter_index_t_struct> columns_to_reduce;
 public:
 
-    ripser(compressed_lower_distance_matrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio)
-            : dist(std::move(_dist)), n(dist.size()),
-              dim_max(std::min(_dim_max, index_t(dist.size() - 2))), threshold(_threshold),
-              ratio(_ratio), binomial_coeff(n, dim_max + 2) {}
-
-    void free_gpumem_dense_computation() {
-        if (n>=10) {//this fixes a bug for single point persistence being called repeatedly
-            cudaFree(d_columns_to_reduce);
-#ifndef ASSEMBLE_REDUCTION_SUBMATRIX
-            cudaFree(d_flagarray);
-#endif
-            cudaFree(d_cidx_to_diameter);
-//            if (n >= 10) {
-            cudaFree(d_distance_matrix);
-//            }
-            cudaFree(d_pivot_column_index_OR_nonapparent_cols);
-#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
-            cudaFree(d_flagarray_OR_index_to_subindex);
-#endif
-//            if (binomial_coeff.get_num_n() * binomial_coeff.get_max_tuple_length() > 0) {
-            cudaFree(h_d_binoms);
-//            }
-            cudaFree(d_binomial_coeff);
-            cudaFree(d_lowest_one_of_apparent_pair);
-            cudaFree(d_pivot_array);
-        }
-    }
-
-    void free_init_cpumem() {
-        free(h_pivot_column_index_array_OR_nonapparent_cols);
-    }
-
-    void free_remaining_cpumem(){
-        free(h_columns_to_reduce);
-        free(h_pivot_array);
-        pivot_column_index.resize(0);
-    }
-
-    index_t calculate_gpu_dim_max_for_fullrips_computation_from_memory(const index_t dim_max, const bool isfullrips){
-
-        if(dim_max==0)return 0;
-        index_t gpu_dim_max= dim_max;
-        index_t gpu_alloc_memory_in_bytes= 0;
-        cudaGetDeviceProperties(&deviceProp, 0);
-
-        cudaMemGetInfo(&freeMem,&totalMem);
-#ifdef PROFILING
-        std::cerr<<"GPU memory before full rips memory calculation, total mem: "<< totalMem<<" bytes, free mem: "<<freeMem<<" bytes"<<std::endl;
-#endif
-        do{
-            index_t gpu_num_simplices_forall_dims= gpu_dim_max<n/2?get_num_simplices_for_dim(gpu_dim_max): get_num_simplices_for_dim(n/2);
-            index_t gpumem_char_array_bytes= sizeof(char)*gpu_num_simplices_forall_dims;
-            index_t gpumem_index_t_array_bytes= sizeof(index_t)*gpu_num_simplices_forall_dims;
-            index_t gpumem_value_t_array_bytes= sizeof(value_t)*gpu_num_simplices_forall_dims;
-            index_t gpumem_index_t_pairs_array_bytes= sizeof(index_t_pair_struct)*gpu_num_simplices_forall_dims;
-            index_t gpumem_diameter_index_t_array_bytes= sizeof(diameter_index_t_struct)*gpu_num_simplices_forall_dims;
-            index_t gpumem_dist_matrix_bytes= sizeof(value_t)*(n*(n-1))/2;
-            index_t gpumem_binomial_coeff_table_bytes= sizeof(index_t)*binomial_coeff.get_num_n()*binomial_coeff.get_max_tuple_length() +sizeof(binomial_coeff_table);
-            index_t gpumem_index_t_bytes= sizeof(index_t);
-            //gpumem_CSR_dist_matrix_bytes is estimated to have n*(n-1)/2 number of nonzeros as an upper bound
-            index_t gpumem_CSR_dist_matrix_bytes= sizeof(index_t)*(n+1+4)+(sizeof(index_t)+sizeof(value_t))*n*(n-1)/2;//dist.num_entries;//sizeof(value_t)*(n*(n-1))/2;
-
-            if(isfullrips) {//count the allocated memory for dense case
-                gpu_alloc_memory_in_bytes= gpumem_diameter_index_t_array_bytes +
-                                           #ifndef ASSEMBLE_REDUCTION_SUBMATRIX
-                                           gpumem_char_array_bytes +
-                                           #endif
-                                           gpumem_value_t_array_bytes +
-                                           #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
-                                           gpumem_index_t_array_bytes+
-                                           #endif
-                                           gpumem_dist_matrix_bytes +
-                                           gpumem_index_t_array_bytes +
-                                           gpumem_binomial_coeff_table_bytes +
-                                           gpumem_index_t_bytes * 2 +
-                                           gpumem_index_t_array_bytes +
-                                           gpumem_index_t_pairs_array_bytes +
-                                           gpumem_index_t_pairs_array_bytes;//this last one is for thrust radix sorting buffer
-
-#ifdef PROFILING
-                //std::cerr<<"free gpu memory for full rips by calculation in bytes for gpu dim: "<<gpu_dim_max<<": "<<freeMem-gpu_alloc_memory_in_bytes<<std::endl;
-                std::cerr<<"gpu memory needed for full rips by calculation in bytes for dim: "<<gpu_dim_max<<": "<<gpu_alloc_memory_in_bytes<<" bytes"<<std::endl;
-#endif
-                if (gpu_alloc_memory_in_bytes <= freeMem){
-                    return gpu_dim_max;
-                }
-            }else{//count the alloced memory for sparse case
-                //includes the d_simplices array used in sparse computation for an approximation for both sparse and full rips compelexes?
-                gpu_alloc_memory_in_bytes= gpumem_diameter_index_t_array_bytes
-                                           #ifdef ASSEMBlE_REDUCTION_SUBMATRIX
-                                           + gpumem_index_t_array_bytes
-                                           #endif
-                                           + gpumem_CSR_dist_matrix_bytes
-                                           + gpumem_diameter_index_t_array_bytes
-                                           + gpumem_index_t_array_bytes
-                                           + gpumem_binomial_coeff_table_bytes
-                                           + gpumem_index_t_array_bytes
-                                           + gpumem_index_t_pairs_array_bytes
-                                           + gpumem_index_t_bytes*4
-                                           + gpumem_diameter_index_t_array_bytes
-                                           + gpumem_index_t_pairs_array_bytes;//last one is for buffer needed for sorting
-#ifdef PROFILING
-                //std::cerr<<"(sparse) free gpu memory for full rips by calculation in bytes for gpu dim: "<<gpu_dim_max<<": "<<freeMem-gpu_alloc_memory_in_bytes<<std::endl;
-                std::cerr<<"(sparse) gpu memory needed for full rips by calculation in bytes for dim: "<<gpu_dim_max<<": "<<gpu_alloc_memory_in_bytes<<" bytes"<<std::endl;
-#endif
-                if (gpu_alloc_memory_in_bytes <= freeMem){
-                    return gpu_dim_max;
-                }
-            }
-            gpu_dim_max--;
-        }while(gpu_dim_max>=0);
-        return 0;
-    }
-
-    index_t get_num_simplices_for_dim(index_t dim){
-        //beware if dim+1>n and where dim is negative
-        assert(dim+1<=n && dim+1>=0);
-        return binomial_coeff(n, dim + 1);
-    }
-
-    index_t get_next_vertex(index_t& v, const index_t idx, const index_t k) const {
-        return v= upper_bound(
-                v, [&](const index_t& w) -> bool { return (binomial_coeff(w, k) <= idx); });
-    }
-
+    explicit ripser(compressed_lower_distance_matrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio);
+    void free_gpumem_dense_computation();
+    void free_init_cpumem();
+    void free_remaining_cpumem();
+    index_t calculate_gpu_dim_max_for_fullrips_computation_from_memory(const index_t dim_max, const bool isfullrips);
+    index_t get_num_simplices_for_dim(index_t dim);
+    index_t get_next_vertex(index_t& v, const index_t idx, const index_t k) const;
     template <typename OutputIterator>
-    OutputIterator get_simplex_vertices(index_t idx, const index_t dim, index_t v,
-                                        OutputIterator out) const {
-        --v;
-        for (index_t k= dim + 1; k > 0; --k) {
-            get_next_vertex(v, idx, k);
-            *out++= v;
-            idx-= binomial_coeff(v, k);
-        }
-        return out;
-    }
-
-    value_t compute_diameter(const index_t index, index_t dim) const {
-        value_t diam= -std::numeric_limits<value_t>::infinity();
-
-        vertices.clear();
-        get_simplex_vertices(index, dim, dist.size(), std::back_inserter(vertices));
-
-        for (index_t i= 0; i <= dim; ++i)
-            for (index_t j= 0; j < i; ++j) {
-                diam= std::max(diam, dist(vertices[i], vertices[j]));
-            }
-        return diam;
-    }
+    OutputIterator get_simplex_vertices(index_t idx, const index_t dim, index_t v, OutputIterator out) const;
+    value_t compute_diameter(const index_t index, index_t dim) const;
 
     class simplex_coboundary_enumerator;
 
     void gpu_assemble_columns_to_reduce_plusplus(const index_t dim);
-
-    void cpu_byneighbor_assemble_columns_to_reduce(std::vector<struct diameter_index_t_struct>& simplices, std::vector<struct diameter_index_t_struct>& columns_to_reduce,
-                                                   hash_map<index_t, index_t>& pivot_column_index, index_t dim);
-
-
+    void cpu_byneighbor_assemble_columns_to_reduce(std::vector<struct diameter_index_t_struct>& simplices, std::vector<struct diameter_index_t_struct>& columns_to_reduce, hash_map<index_t, index_t>& pivot_column_index, index_t dim);
     void assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only, std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim);
-
-    index_t get_value_pivot_array_hashmap(index_t row_cidx, struct row_cidx_column_idx_struct_compare cmp){
-#ifdef USE_PHASHMAP
-        index_t col_idx= phmap_get_value(row_cidx);
-        if(col_idx==-1){
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-            auto pair= pivot_column_index.find(row_cidx);
-        if(pair==pivot_column_index.end()){
-#endif
-            index_t first= 0;
-            index_t last= num_apparent- 1;
-
-            while(first<=last){
-                index_t mid= first + (last-first)/2;
-                if(h_pivot_array[mid].row_cidx==row_cidx){
-                    return h_pivot_array[mid].column_idx;
-                }
-                if(h_pivot_array[mid].row_cidx<row_cidx){
-                    first= mid+1;
-                }else{
-                    last= mid-1;
-                }
-            }
-            return -1;
-
-        }else{
-
-#ifdef USE_PHASHMAP
-            return col_idx;
-#endif
-#ifdef USE_GOOGLE_HASHMAP
-            return pair->second;
-#endif
-        }
-    }
-
-
-    void compute_dim_0_pairs(std::vector<diameter_index_t_struct>& edges,
-                             std::vector<diameter_index_t_struct>& columns_to_reduce) {
-#ifdef PRINT_PERSISTENCE_PAIRS
-        std::cout << "persistence intervals in dim 0:" << std::endl;
-#endif
-
-        union_find dset(n);
-
-        edges= get_edges();
-        struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
-
-        std::sort(edges.rbegin(), edges.rend(), cmp);
-
-        std::vector<index_t> vertices_of_edge(2);
-        for (auto e : edges) {
-            get_simplex_vertices(e.index, 1, n, vertices_of_edge.rbegin());
-            index_t u= dset.find(vertices_of_edge[0]), v= dset.find(vertices_of_edge[1]);
-
-            if (u != v) {
-#if defined(PRINT_PERSISTENCE_PAIRS) || defined(PYTHON_BARCODE_COLLECTION)
-                if(e.diameter!=0) {
-#ifdef PRINT_PERSISTENCE_PAIRS
-                    std::cout << " [0," << e.diameter << ")" << std::endl;
-#endif
-                    //Collect persistence pair
-                    birth_death_coordinate barcode = {0,e.diameter};
-                    list_of_barcodes[0].push_back(barcode);
-                }
-#endif
-                dset.link(u, v);
-            } else {
-                columns_to_reduce.push_back(e);
-            }
-        }
-        std::reverse(columns_to_reduce.begin(), columns_to_reduce.end());
-
-#ifdef PRINT_PERSISTENCE_PAIRS
-        for (index_t i= 0; i < n; ++i)
-            if (dset.find(i) == i) std::cout << " [0, )" << std::endl;
-#endif
-    }
+    index_t get_value_pivot_array_hashmap(index_t row_cidx, struct row_cidx_column_idx_struct_compare cmp);
+    void compute_dim_0_pairs(std::vector<diameter_index_t_struct>& edges, std::vector<diameter_index_t_struct>& columns_to_reduce);
     void gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce);
-
     void gpuscan(const index_t dim);
-
     template <typename Column>
     diameter_index_t_struct init_coboundary_and_get_pivot_fullmatrix(const diameter_index_t_struct simplex, Column& working_coboundary, const index_t& dim, hash_map<index_t, index_t>& pivot_column_index);
-
     template <typename Column>
     diameter_index_t_struct init_coboundary_and_get_pivot_submatrix(const diameter_index_t_struct simplex, Column& working_coboundary, index_t dim, struct row_cidx_column_idx_struct_compare cmp);
-
     template <typename Column>
     void add_simplex_coboundary_oblivious(const diameter_index_t_struct simplex, const index_t& dim, Column& working_coboundary);
-
     template <typename Column>
     void add_simplex_coboundary_use_reduction_column(const diameter_index_t_struct simplex, const index_t& dim, Column& working_reduction_column, Column& working_coboundary);
-
     //THIS IS THE METHOD TO CALL FOR CPU SIDE FULL MATRIX REDUCTION
     template <typename Column>
     void add_coboundary_fullmatrix(compressed_sparse_matrix<diameter_index_t_struct>& reduction_matrix, const std::vector<diameter_index_t_struct>& columns_to_reduce, const size_t index_column_to_add, const size_t& dim, Column& working_reduction_column, Column& working_coboundary);
-
     //THIS IS THE METHOD TO CALL FOR SUBMATRIX REDUCTION ON CPU SIDE
 #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
     template <typename Column>
-    void add_coboundary_reduction_submatrix(compressed_sparse_submatrix<diameter_index_t_struct>& reduction_submatrix,
-                                            const size_t index_column_to_add, const size_t& dim,
-                                            Column& working_reduction_column, Column& working_coboundary) {
-        diameter_index_t_struct column_to_add= h_columns_to_reduce[index_column_to_add];
-        add_simplex_coboundary_use_reduction_column(column_to_add, dim, working_reduction_column, working_coboundary);
-        index_t subindex= h_flagarray_OR_index_to_subindex[index_column_to_add];//this is only defined when ASSEMBLE_REDUCTION_SUBMATRIX is defined
-        if(subindex>-1) {
-            for (diameter_index_t_struct simplex : reduction_submatrix.subrange(subindex)) {
-                add_simplex_coboundary_use_reduction_column(simplex, dim, working_reduction_column, working_coboundary);
-            }
-        }
-    }
+    void add_coboundary_reduction_submatrix(compressed_sparse_submatrix<diameter_index_t_struct>& reduction_submatrix, const size_t index_column_to_add, const size_t& dim, Column& working_reduction_column, Column& working_coboundary);
 #endif
-
-    void compute_pairs(std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t, index_t>& pivot_column_index, index_t dim) {
-        std::cout << "persistence intervals in dim " << dim << ":" << std::endl;
-        for(index_t index_column_to_reduce= 0; index_column_to_reduce < columns_to_reduce.size(); ++index_column_to_reduce) {
-            auto column_to_reduce= columns_to_reduce[index_column_to_reduce];
-            std::priority_queue<diameter_index_t_struct, std::vector<diameter_index_t_struct>,
-            greaterdiam_lowerindex_diameter_index_t_struct_compare> working_coboundary;
-            value_t diameter = column_to_reduce.diameter;
-            index_t index_column_to_add = index_column_to_reduce;
-            diameter_index_t_struct pivot;
-            // initialize index bounds of reduction matrix
-            pivot = init_coboundary_and_get_pivot_fullmatrix(columns_to_reduce[index_column_to_add], working_coboundary, dim, pivot_column_index);
-            while(true) {
-                if(pivot.index!=-1) {
-                    auto left_pair= pivot_column_index.find(pivot.index);
-                    if(left_pair != pivot_column_index.end()) {
-                        index_column_to_add= left_pair->second;
-                        add_simplex_coboundary_oblivious(columns_to_reduce[index_column_to_add], dim, working_coboundary);
-                        pivot= get_pivot(working_coboundary);
-                    }
-                    else {
-                        value_t death= pivot.diameter;
-                        if(death > diameter * ratio) {
-                            std::cout << " [" << diameter << "," << death << ")" << std::endl
-                                      << std::flush;
-                            birth_death_coordinate barcode = {diameter,death};
-                            list_of_barcodes[dim].push_back(barcode);
-                        }
-                        pivot_column_index[pivot.index]= index_column_to_reduce;
-
-                        break;
-                    }
-                }
-                else {
-                    std::cout << " [" << diameter << ", )" << std::endl << std::flush;
-                    break;
-                }
-            }
-        }
-    }
-
-    void compute_pairs_plusplus(index_t dim, index_t gpuscan_startingdim) {
-
-        std::cout << "persistence intervals in dim " << dim << ":" << std::endl;
-        compressed_sparse_submatrix<diameter_index_t_struct> reduction_submatrix;
-        struct row_cidx_column_idx_struct_compare cmp_pivots;
-        index_t num_columns_to_iterate= *h_num_columns_to_reduce;
-        if(dim>=gpuscan_startingdim){
-            num_columns_to_iterate= *h_num_nonapparent;
-        }
-        for (index_t sub_index_column_to_reduce= 0; sub_index_column_to_reduce < num_columns_to_iterate;
-             ++sub_index_column_to_reduce) {
-            index_t index_column_to_reduce =sub_index_column_to_reduce;
-            if(dim>=gpuscan_startingdim) {
-                index_column_to_reduce= h_pivot_column_index_array_OR_nonapparent_cols[sub_index_column_to_reduce];//h_nonapparent_cols
-            }
-            auto column_to_reduce= h_columns_to_reduce[index_column_to_reduce];
-
-            std::priority_queue<diameter_index_t_struct, std::vector<diameter_index_t_struct>,
-            greaterdiam_lowerindex_diameter_index_t_struct_compare>
-                    working_reduction_column,
-                    working_coboundary;
-
-            value_t diameter= column_to_reduce.diameter;
-
-            index_t index_column_to_add= index_column_to_reduce;
-
-            struct diameter_index_t_struct pivot;
-            reduction_submatrix.append_column();
-            pivot= init_coboundary_and_get_pivot_submatrix(column_to_reduce, working_coboundary, dim, cmp_pivots);
-
-            while (true) {
-                if(pivot.index!=-1) {
-                    index_column_to_add= get_value_pivot_array_hashmap(pivot.index,cmp_pivots);
-                    if(index_column_to_add!=-1) {
-                        add_coboundary_reduction_submatrix(reduction_submatrix, index_column_to_add, dim, working_reduction_column, working_coboundary);
-                        pivot= get_pivot(working_coboundary);
-                    }
-                    else{
-                        value_t death= pivot.diameter;
-                        if (death > diameter * ratio) {
-                            std::cout << " [" << diameter << "," << death << ")" << std::endl
-                                      << std::flush;
-                            birth_death_coordinate barcode = {diameter,death};
-                            list_of_barcodes[dim].push_back(barcode);
-                        }
-
-                        phmap_put(pivot.index, index_column_to_reduce);
-                        while (true) {
-                            diameter_index_t_struct e= pop_pivot(working_reduction_column);
-                            if (e.index == -1) break;
-                            reduction_submatrix.push_back(e);
-                        }
-                        break;
-                    }
-                }
-                else {
-                    std::cout << " [" << diameter << ", )" << std::endl << std::flush;
-                    break;
-                }
-            }
-        }
-    }
-
+    void compute_pairs(std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t, index_t>& pivot_column_index, index_t dim);
+    void compute_pairs_plusplus(index_t dim, index_t gpuscan_startingdim);
     std::vector<diameter_index_t_struct> get_edges();
     void compute_barcodes();
 };
@@ -1196,6 +856,153 @@ public:
         return {cofacet_diameter, cofacet_index};
     }
 };
+
+ripser::ripser(compressed_lower_distance_matrix&& _dist, index_t _dim_max, value_t _threshold, float _ratio)
+    : dist(std::move(_dist)), n(dist.size()), dim_max(std::min(_dim_max, index_t(dist.size() - 2))), threshold(_threshold), ratio(_ratio), binomial_coeff(n, dim_max + 2) {}
+
+void ripser::free_gpumem_dense_computation() {
+    if (n>=10) {//this fixes a bug for single point persistence being called repeatedly
+        cudaFree(d_columns_to_reduce);
+#ifndef ASSEMBLE_REDUCTION_SUBMATRIX
+        cudaFree(d_flagarray);
+#endif
+        cudaFree(d_cidx_to_diameter);
+//            if (n >= 10) {
+        cudaFree(d_distance_matrix);
+//            }
+        cudaFree(d_pivot_column_index_OR_nonapparent_cols);
+#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
+        cudaFree(d_flagarray_OR_index_to_subindex);
+#endif
+//            if (binomial_coeff.get_num_n() * binomial_coeff.get_max_tuple_length() > 0) {
+        cudaFree(h_d_binoms);
+//            }
+        cudaFree(d_binomial_coeff);
+        cudaFree(d_lowest_one_of_apparent_pair);
+        cudaFree(d_pivot_array);
+    }
+}
+
+void ripser::free_init_cpumem() {
+    free(h_pivot_column_index_array_OR_nonapparent_cols);
+}
+
+void ripser::free_remaining_cpumem(){
+    free(h_columns_to_reduce);
+    free(h_pivot_array);
+    pivot_column_index.resize(0);
+}
+
+index_t ripser::calculate_gpu_dim_max_for_fullrips_computation_from_memory(const index_t dim_max, const bool isfullrips){
+
+    if(dim_max==0)return 0;
+    index_t gpu_dim_max= dim_max;
+    index_t gpu_alloc_memory_in_bytes= 0;
+    cudaGetDeviceProperties(&deviceProp, 0);
+
+    cudaMemGetInfo(&freeMem,&totalMem);
+#ifdef PROFILING
+    std::cerr<<"GPU memory before full rips memory calculation, total mem: "<< totalMem<<" bytes, free mem: "<<freeMem<<" bytes"<<std::endl;
+#endif
+    do{
+        index_t gpu_num_simplices_forall_dims= gpu_dim_max<n/2?get_num_simplices_for_dim(gpu_dim_max): get_num_simplices_for_dim(n/2);
+        index_t gpumem_char_array_bytes= sizeof(char)*gpu_num_simplices_forall_dims;
+        index_t gpumem_index_t_array_bytes= sizeof(index_t)*gpu_num_simplices_forall_dims;
+        index_t gpumem_value_t_array_bytes= sizeof(value_t)*gpu_num_simplices_forall_dims;
+        index_t gpumem_index_t_pairs_array_bytes= sizeof(index_t_pair_struct)*gpu_num_simplices_forall_dims;
+        index_t gpumem_diameter_index_t_array_bytes= sizeof(diameter_index_t_struct)*gpu_num_simplices_forall_dims;
+        index_t gpumem_dist_matrix_bytes= sizeof(value_t)*(n*(n-1))/2;
+        index_t gpumem_binomial_coeff_table_bytes= sizeof(index_t)*binomial_coeff.get_num_n()*binomial_coeff.get_max_tuple_length() +sizeof(binomial_coeff_table);
+        index_t gpumem_index_t_bytes= sizeof(index_t);
+        //gpumem_CSR_dist_matrix_bytes is estimated to have n*(n-1)/2 number of nonzeros as an upper bound
+        index_t gpumem_CSR_dist_matrix_bytes= sizeof(index_t)*(n+1+4)+(sizeof(index_t)+sizeof(value_t))*n*(n-1)/2;//dist.num_entries;//sizeof(value_t)*(n*(n-1))/2;
+
+        if(isfullrips) {//count the allocated memory for dense case
+            gpu_alloc_memory_in_bytes= gpumem_diameter_index_t_array_bytes +
+                                       #ifndef ASSEMBLE_REDUCTION_SUBMATRIX
+                                       gpumem_char_array_bytes +
+                                       #endif
+                                       gpumem_value_t_array_bytes +
+                                       #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
+                                       gpumem_index_t_array_bytes+
+                                       #endif
+                                       gpumem_dist_matrix_bytes +
+                                       gpumem_index_t_array_bytes +
+                                       gpumem_binomial_coeff_table_bytes +
+                                       gpumem_index_t_bytes * 2 +
+                                       gpumem_index_t_array_bytes +
+                                       gpumem_index_t_pairs_array_bytes +
+                                       gpumem_index_t_pairs_array_bytes;//this last one is for thrust radix sorting buffer
+
+#ifdef PROFILING
+            //std::cerr<<"free gpu memory for full rips by calculation in bytes for gpu dim: "<<gpu_dim_max<<": "<<freeMem-gpu_alloc_memory_in_bytes<<std::endl;
+                std::cerr<<"gpu memory needed for full rips by calculation in bytes for dim: "<<gpu_dim_max<<": "<<gpu_alloc_memory_in_bytes<<" bytes"<<std::endl;
+#endif
+            if (gpu_alloc_memory_in_bytes <= freeMem){
+                return gpu_dim_max;
+            }
+        }else{//count the alloced memory for sparse case
+            //includes the d_simplices array used in sparse computation for an approximation for both sparse and full rips compelexes?
+            gpu_alloc_memory_in_bytes= gpumem_diameter_index_t_array_bytes
+                                       #ifdef ASSEMBlE_REDUCTION_SUBMATRIX
+                                       + gpumem_index_t_array_bytes
+                                       #endif
+                                       + gpumem_CSR_dist_matrix_bytes
+                                       + gpumem_diameter_index_t_array_bytes
+                                       + gpumem_index_t_array_bytes
+                                       + gpumem_binomial_coeff_table_bytes
+                                       + gpumem_index_t_array_bytes
+                                       + gpumem_index_t_pairs_array_bytes
+                                       + gpumem_index_t_bytes*4
+                                       + gpumem_diameter_index_t_array_bytes
+                                       + gpumem_index_t_pairs_array_bytes;//last one is for buffer needed for sorting
+#ifdef PROFILING
+            //std::cerr<<"(sparse) free gpu memory for full rips by calculation in bytes for gpu dim: "<<gpu_dim_max<<": "<<freeMem-gpu_alloc_memory_in_bytes<<std::endl;
+                std::cerr<<"(sparse) gpu memory needed for full rips by calculation in bytes for dim: "<<gpu_dim_max<<": "<<gpu_alloc_memory_in_bytes<<" bytes"<<std::endl;
+#endif
+            if (gpu_alloc_memory_in_bytes <= freeMem){
+                return gpu_dim_max;
+            }
+        }
+        gpu_dim_max--;
+    }while(gpu_dim_max>=0);
+    return 0;
+}
+
+index_t ripser::get_num_simplices_for_dim(index_t dim){
+    //beware if dim+1>n and where dim is negative
+    assert(dim+1<=n && dim+1>=0);
+    return binomial_coeff(n, dim + 1);
+}
+
+index_t ripser::get_next_vertex(index_t& v, const index_t idx, const index_t k) const {
+    return v= upper_bound(
+            v, [&](const index_t& w) -> bool { return (binomial_coeff(w, k) <= idx); });
+}
+
+template <typename OutputIterator>
+OutputIterator ripser::get_simplex_vertices(index_t idx, const index_t dim, index_t v, OutputIterator out) const {
+    --v;
+    for (index_t k= dim + 1; k > 0; --k) {
+        get_next_vertex(v, idx, k);
+        *out++= v;
+        idx-= binomial_coeff(v, k);
+    }
+    return out;
+}
+
+value_t ripser::compute_diameter(const index_t index, index_t dim) const {
+    value_t diam= -std::numeric_limits<value_t>::infinity();
+
+    vertices.clear();
+    get_simplex_vertices(index, dim, dist.size(), std::back_inserter(vertices));
+
+    for (index_t i= 0; i <= dim; ++i)
+        for (index_t j= 0; j < i; ++j) {
+            diam= std::max(diam, dist(vertices[i], vertices[j]));
+        }
+    return diam;
+}
 
 template <typename Column>
 diameter_index_t_struct ripser::init_coboundary_and_get_pivot_fullmatrix(const diameter_index_t_struct simplex, Column& working_coboundary, const index_t& dim, hash_map<index_t, index_t>& pivot_column_index) {
@@ -1255,6 +1062,123 @@ void ripser::add_simplex_coboundary_use_reduction_column(const diameter_index_t_
     while (cofacets.has_next()) {
         diameter_index_t_struct cofacet= cofacets.next();
         if (cofacet.diameter <= threshold) working_coboundary.push(cofacet);
+    }
+}
+
+#ifdef ASSEMBLE_REDUCTION_SUBMATRIX
+template <typename Column>
+void ripser::add_coboundary_reduction_submatrix(compressed_sparse_submatrix<diameter_index_t_struct>& reduction_submatrix, const size_t index_column_to_add, const size_t& dim, Column& working_reduction_column, Column& working_coboundary) {
+    diameter_index_t_struct column_to_add= h_columns_to_reduce[index_column_to_add];
+    add_simplex_coboundary_use_reduction_column(column_to_add, dim, working_reduction_column, working_coboundary);
+    index_t subindex= h_flagarray_OR_index_to_subindex[index_column_to_add];//this is only defined when ASSEMBLE_REDUCTION_SUBMATRIX is defined
+    if(subindex>-1) {
+        for (diameter_index_t_struct simplex : reduction_submatrix.subrange(subindex)) {
+            add_simplex_coboundary_use_reduction_column(simplex, dim, working_reduction_column, working_coboundary);
+        }
+    }
+}
+#endif
+
+void ripser::compute_pairs(std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t, index_t>& pivot_column_index, index_t dim) {
+    std::cout << "persistence intervals in dim " << dim << ":" << std::endl;
+    for(index_t index_column_to_reduce= 0; index_column_to_reduce < columns_to_reduce.size(); ++index_column_to_reduce) {
+        auto column_to_reduce= columns_to_reduce[index_column_to_reduce];
+        std::priority_queue<diameter_index_t_struct, std::vector<diameter_index_t_struct>,
+                greaterdiam_lowerindex_diameter_index_t_struct_compare> working_coboundary;
+        value_t diameter = column_to_reduce.diameter;
+        index_t index_column_to_add = index_column_to_reduce;
+        diameter_index_t_struct pivot;
+        // initialize index bounds of reduction matrix
+        pivot = init_coboundary_and_get_pivot_fullmatrix(columns_to_reduce[index_column_to_add], working_coboundary, dim, pivot_column_index);
+        while(true) {
+            if(pivot.index!=-1) {
+                auto left_pair= pivot_column_index.find(pivot.index);
+                if(left_pair != pivot_column_index.end()) {
+                    index_column_to_add= left_pair->second;
+                    add_simplex_coboundary_oblivious(columns_to_reduce[index_column_to_add], dim, working_coboundary);
+                    pivot= get_pivot(working_coboundary);
+                }
+                else {
+                    value_t death= pivot.diameter;
+                    if(death > diameter * ratio) {
+                        std::cout << " [" << diameter << "," << death << ")" << std::endl
+                                  << std::flush;
+                        birth_death_coordinate barcode = {diameter,death};
+                        list_of_barcodes[dim].push_back(barcode);
+                    }
+                    pivot_column_index[pivot.index]= index_column_to_reduce;
+
+                    break;
+                }
+            }
+            else {
+                std::cout << " [" << diameter << ", )" << std::endl << std::flush;
+                break;
+            }
+        }
+    }
+}
+
+void ripser::compute_pairs_plusplus(index_t dim, index_t gpuscan_startingdim) {
+
+    std::cout << "persistence intervals in dim " << dim << ":" << std::endl;
+    compressed_sparse_submatrix<diameter_index_t_struct> reduction_submatrix;
+    struct row_cidx_column_idx_struct_compare cmp_pivots;
+    index_t num_columns_to_iterate= *h_num_columns_to_reduce;
+    if(dim>=gpuscan_startingdim){
+        num_columns_to_iterate= *h_num_nonapparent;
+    }
+    for (index_t sub_index_column_to_reduce= 0; sub_index_column_to_reduce < num_columns_to_iterate;
+         ++sub_index_column_to_reduce) {
+        index_t index_column_to_reduce =sub_index_column_to_reduce;
+        if(dim>=gpuscan_startingdim) {
+            index_column_to_reduce= h_pivot_column_index_array_OR_nonapparent_cols[sub_index_column_to_reduce];//h_nonapparent_cols
+        }
+        auto column_to_reduce= h_columns_to_reduce[index_column_to_reduce];
+
+        std::priority_queue<diameter_index_t_struct, std::vector<diameter_index_t_struct>,
+                greaterdiam_lowerindex_diameter_index_t_struct_compare>
+                working_reduction_column,
+                working_coboundary;
+
+        value_t diameter= column_to_reduce.diameter;
+
+        index_t index_column_to_add= index_column_to_reduce;
+
+        struct diameter_index_t_struct pivot;
+        reduction_submatrix.append_column();
+        pivot= init_coboundary_and_get_pivot_submatrix(column_to_reduce, working_coboundary, dim, cmp_pivots);
+
+        while (true) {
+            if(pivot.index!=-1) {
+                index_column_to_add= get_value_pivot_array_hashmap(pivot.index,cmp_pivots);
+                if(index_column_to_add!=-1) {
+                    add_coboundary_reduction_submatrix(reduction_submatrix, index_column_to_add, dim, working_reduction_column, working_coboundary);
+                    pivot= get_pivot(working_coboundary);
+                }
+                else{
+                    value_t death= pivot.diameter;
+                    if (death > diameter * ratio) {
+                        std::cout << " [" << diameter << "," << death << ")" << std::endl
+                                  << std::flush;
+                        birth_death_coordinate barcode = {diameter,death};
+                        list_of_barcodes[dim].push_back(barcode);
+                    }
+
+                    phmap_put(pivot.index, index_column_to_reduce);
+                    while (true) {
+                        diameter_index_t_struct e= pop_pivot(working_reduction_column);
+                        if (e.index == -1) break;
+                        reduction_submatrix.push_back(e);
+                    }
+                    break;
+                }
+            }
+            else {
+                std::cout << " [" << diameter << ", )" << std::endl << std::flush;
+                break;
+            }
+        }
     }
 }
 
@@ -1542,6 +1466,83 @@ void ripser::assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_
 
     greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
     std::sort(columns_to_reduce.begin(), columns_to_reduce.end(), cmp);
+}
+
+index_t ripser::get_value_pivot_array_hashmap(index_t row_cidx, struct row_cidx_column_idx_struct_compare cmp) {
+#ifdef USE_PHASHMAP
+    index_t col_idx= phmap_get_value(row_cidx);
+    if(col_idx==-1){
+#endif
+#ifdef USE_GOOGLE_HASHMAP
+        auto pair= pivot_column_index.find(row_cidx);
+        if(pair==pivot_column_index.end()){
+#endif
+        index_t first= 0;
+        index_t last= num_apparent- 1;
+
+        while(first<=last){
+            index_t mid= first + (last-first)/2;
+            if(h_pivot_array[mid].row_cidx==row_cidx){
+                return h_pivot_array[mid].column_idx;
+            }
+            if(h_pivot_array[mid].row_cidx<row_cidx){
+                first= mid+1;
+            }else{
+                last= mid-1;
+            }
+        }
+        return -1;
+
+    }else{
+
+#ifdef USE_PHASHMAP
+        return col_idx;
+#endif
+#ifdef USE_GOOGLE_HASHMAP
+        return pair->second;
+#endif
+    }
+}
+
+void ripser::compute_dim_0_pairs(std::vector<diameter_index_t_struct>& edges, std::vector<diameter_index_t_struct>& columns_to_reduce) {
+#ifdef PRINT_PERSISTENCE_PAIRS
+    std::cout << "persistence intervals in dim 0:" << std::endl;
+#endif
+
+    union_find dset(n);
+
+    edges= get_edges();
+    struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
+
+    std::sort(edges.rbegin(), edges.rend(), cmp);
+
+    std::vector<index_t> vertices_of_edge(2);
+    for (auto e : edges) {
+        get_simplex_vertices(e.index, 1, n, vertices_of_edge.rbegin());
+        index_t u= dset.find(vertices_of_edge[0]), v= dset.find(vertices_of_edge[1]);
+
+        if (u != v) {
+#if defined(PRINT_PERSISTENCE_PAIRS) || defined(PYTHON_BARCODE_COLLECTION)
+            if(e.diameter!=0) {
+#ifdef PRINT_PERSISTENCE_PAIRS
+                std::cout << " [0," << e.diameter << ")" << std::endl;
+#endif
+                //Collect persistence pair
+                birth_death_coordinate barcode = {0,e.diameter};
+                list_of_barcodes[0].push_back(barcode);
+            }
+#endif
+            dset.link(u, v);
+        } else {
+            columns_to_reduce.push_back(e);
+        }
+    }
+    std::reverse(columns_to_reduce.begin(), columns_to_reduce.end());
+
+#ifdef PRINT_PERSISTENCE_PAIRS
+    for (index_t i= 0; i < n; ++i)
+        if (dset.find(i) == i) std::cout << " [0, )" << std::endl;
+#endif
 }
 
 void ripser::compute_barcodes() {
