@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.2)
 project(pyripser++)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fconcepts")
+
 find_package(CUDA 7 REQUIRED)
 
 #set(CMAKE_BUILD_TYPE "Debug")
@@ -113,3 +116,29 @@ cuda_add_executable(hh
 )
 target_include_directories(hh PUBLIC ${CMAKE_SOURCE_DIR}/ripserplusplus/include)
 target_compile_definitions(hh PUBLIC PRINT_PERSISTENCE_PAIRS)
+
+
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+
+include(FetchContent)
+if(NOT Hedgehog_INCLUDE_DIR)
+    # Hedgehog 3.0
+    FetchContent_Declare(Hedgehog
+        GIT_REPOSITORY https://github.com/usnistgov/hedgehog.git
+        GIT_TAG        master
+    )
+    FetchContent_MakeAvailable(Hedgehog)
+
+    # Need to set variable Hedgehog_INCLUDE_DIR to the downloaded hedgehog src code
+    set(Hedgehog_INCLUDE_DIR "${hedgehog_SOURCE_DIR}" CACHE STRING "${hedgehog_SOURCE_DIR}" FORCE)
+endif(NOT Hedgehog_INCLUDE_DIR)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake-modules")
+find_package(Hedgehog REQUIRED)
+
+cuda_add_library(hh_lib STATIC hh.cu ripserplusplus/include/phmap_interface/phmap_interface.cpp)
+target_include_directories(hh_lib PUBLIC ${CMAKE_SOURCE_DIR}/ripserplusplus/include)
+target_compile_definitions(hh_lib PUBLIC PRINT_PERSISTENCE_PAIRS HH_LIB)
+
+add_executable(ripser_hh ripser_hh.cpp)
+target_include_directories(ripser_hh PUBLIC ${Hedgehog_INCLUDE_DIRS} ${CUDA_INCLUDE_DIRS})
+target_link_libraries(ripser_hh PUBLIC hh_lib ${Hedgehog_LIBRARIES} ${CUDA_LIBRARIES})
