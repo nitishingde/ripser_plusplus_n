@@ -201,7 +201,6 @@ private:
     //index_t* h_lowest_one_of_apparent_pair;//the lowest ones, d_lowest_one_of_apparent_pair[col]= lowest one row of column col
     struct index_t_pair_struct* d_pivot_array;//sorted array of all pivots, substitute for a structured hashmap with lookup done by log(n) binary search
     struct index_t_pair_struct* h_pivot_array;//sorted array of all pivots
-    std::vector<struct diameter_index_t_struct> columns_to_reduce;
     std::vector<std::vector<birth_death_coordinate>> list_of_barcodes;
 public:
 

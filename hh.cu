@@ -1328,6 +1328,7 @@ void ripser::compute_dim_0_pairs(std::vector<diameter_index_t_struct>& edges, st
 void ripser::compute_barcodes() {
     index_t gpu_dim_max = calculate_gpu_dim_max_for_fullrips_computation_from_memory(dim_max, true);
 
+    std::vector<struct diameter_index_t_struct> columns_to_reduce;
     max_num_simplices_forall_dims= gpu_dim_max<(n/2)-1?get_num_simplices_for_dim(gpu_dim_max): get_num_simplices_for_dim((n/2)-1);
     if(1 <= gpu_dim_max) {
 
