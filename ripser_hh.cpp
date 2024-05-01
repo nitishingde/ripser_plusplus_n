@@ -197,6 +197,7 @@ public:
     void execute(std::shared_ptr<GlobalContext> ctx) override {
         if(ctx->currentDim < ctx->gpu_dim_max) {
             ctx->pRipser->gpu_assemble_columns_to_reduce_plusplus(ctx->currentDim+1, this->stream());
+            cudaStreamSynchronize(this->stream());
         }
         this->addResult(ctx);
     }
