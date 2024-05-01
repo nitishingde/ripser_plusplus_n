@@ -1146,11 +1146,7 @@ void ripser::gpuscan(const index_t dim) {
 
 //finding apparent pairs
 void ripser::gpu_assemble_columns_to_reduce_plusplus(const index_t dim, cudaStream_t cudaStream) {
-
     index_t max_num_simplices= binomial_coeff(n, dim + 1);
-
-    Stopwatch sw;
-    sw.start();
 
 #pragma omp parallel for schedule(guided,1)
     for (index_t i= 0; i < max_num_simplices; i++) {
@@ -1177,7 +1173,6 @@ void ripser::gpu_assemble_columns_to_reduce_plusplus(const index_t dim, cudaStre
     *h_num_columns_to_reduce= 0;
     cudaMemcpyAsync(d_pivot_column_index_OR_nonapparent_cols, h_pivot_column_index_array_OR_nonapparent_cols, sizeof(index_t)*max_num_simplices, cudaMemcpyHostToDevice, cudaStream);
 
-    sw.stop();
 #ifdef PROFILING
     std::cerr<<"time to copy hash map for dim "<<dim<<": "<<sw.ms()/1000.0<<"s"<<std::endl;
 #endif
@@ -1187,8 +1182,6 @@ void ripser::gpu_assemble_columns_to_reduce_plusplus(const index_t dim, cudaStre
     cudaMemset(d_flagarray, 0, sizeof(char)*max_num_simplices);
     CUDACHECK(cudaDeviceSynchronize());
 #endif
-    Stopwatch pop_cols_timer;
-    pop_cols_timer.start();
 
 #ifdef ASSEMBLE_REDUCTION_SUBMATRIX
     CUDACHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&grid_size, populate_columns_to_reduce<index_t>, 256, 0));
@@ -1199,7 +1192,6 @@ void ripser::gpu_assemble_columns_to_reduce_plusplus(const index_t dim, cudaStre
     grid_size  *= deviceProp.multiProcessorCount;
     populate_columns_to_reduce<<<grid_size, 256, 256 * (dim + 1) * sizeof(index_t), cudaStream>>>(d_flagarray, d_columns_to_reduce, d_pivot_column_index_OR_nonapparent_cols, d_distance_matrix, n, max_num_simplices, dim, threshold, d_binomial_coeff);
 #endif
-    pop_cols_timer.stop();
 
     struct greaterdiam_lowerindex_diameter_index_t_struct_compare cmp;
 
