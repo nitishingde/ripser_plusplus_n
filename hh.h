@@ -146,6 +146,7 @@ public:
 };
 
 class ripser {
+public:
     compressed_lower_distance_matrix dist;//this can be either sparse or compressed
 
     index_t n, dim_max;//n is the number of points, dim_max is the max dimension to compute PH
@@ -154,7 +155,6 @@ class ripser {
     const binomial_coeff_table binomial_coeff;
     mutable std::vector<index_t> vertices;
     mutable std::vector<diameter_index_t_struct> cofacet_entries;
-private:
     size_t freeMem, totalMem;
     cudaDeviceProp deviceProp;
     int grid_size;
@@ -217,12 +217,17 @@ public:
 
     class simplex_coboundary_enumerator;
 
-    void gpu_assemble_columns_to_reduce_plusplus(const index_t dim);
+    void gpu_assemble_columns_to_reduce_plusplus(const index_t dim, cudaStream_t cudaStream = 0);
     void cpu_byneighbor_assemble_columns_to_reduce(std::vector<struct diameter_index_t_struct>& simplices, std::vector<struct diameter_index_t_struct>& columns_to_reduce, hash_map<index_t, index_t>& pivot_column_index, index_t dim);
     void assemble_columns_gpu_accel_transition_to_cpu_only(const bool& more_than_one_dim_cpu_only, std::vector<diameter_index_t_struct>& simplices, std::vector<diameter_index_t_struct>& columns_to_reduce, hash_map<index_t,index_t>& cpu_pivot_column_index, index_t dim);
     index_t get_value_pivot_array_hashmap(index_t row_cidx, struct row_cidx_column_idx_struct_compare cmp);
     void compute_dim_0_pairs(std::vector<diameter_index_t_struct>& edges, std::vector<diameter_index_t_struct>& columns_to_reduce);
     void gpu_compute_dim_0_pairs(std::vector<struct diameter_index_t_struct>& columns_to_reduce);
+    void gpuscan_0(const index_t dim, const index_t num_simplices, cudaStream_t cudaStream);
+    void gpuscan_1(const index_t dim, const index_t num_simplices, cudaStream_t cudaStream);
+    void gpuscan_2(const index_t dim, const index_t num_simplices, cudaStream_t cudaStream);
+    void gpuscan_3(const index_t dim, const index_t num_simplices, cudaStream_t cudaStream);
+    void gpuscan_4(const index_t dim, const index_t num_simplices, cudaStream_t cudaStream);
     void gpuscan(const index_t dim);
     template <typename Column>
     diameter_index_t_struct init_coboundary_and_get_pivot_fullmatrix(const diameter_index_t_struct simplex, Column& working_coboundary, const index_t& dim, hash_map<index_t, index_t>& pivot_column_index);
@@ -244,6 +249,8 @@ public:
     void compute_pairs_plusplus(index_t dim, index_t gpuscan_startingdim);
     std::vector<diameter_index_t_struct> get_edges();
     void compute_barcodes();
+    void init(index_t gpu_dim_max);//@nitish
+    void set_h_num_nonapparent(const index_t val);
 };
 
 compressed_lower_distance_matrix read_file(std::istream& input_stream);
