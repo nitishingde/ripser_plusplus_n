@@ -73,7 +73,7 @@ public:
             pRipser->free_gpumem_dense_computation();
             cudaFreeHost(pRipser->h_num_columns_to_reduce);
             cudaFreeHost(pRipser->h_num_nonapparent);
-//            free(pRipser->h_flagarray_OR_index_to_subindex);
+            free(pRipser->h_flagarray_OR_index_to_subindex);
         }
         canTerminate_.store(true);
     }
