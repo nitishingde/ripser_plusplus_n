@@ -281,6 +281,11 @@ int main(int argc, char** argv) {
     graph.pushData(ctx);
     graph.finishPushingData();
     graph.waitForTermination();
+    double time = double((
+            graph.core()->dequeueExecDuration() == std::chrono::nanoseconds::zero()?
+            std::chrono::system_clock::now() - graph.core()->startExecutionTimeStamp():
+            graph.core()->dequeueExecDuration()).count())/1.e6;
+    printf("%f\n", time);
     graph.createDotFile("ripser.dot", hh::ColorScheme::EXECUTION);
 
     return 0;

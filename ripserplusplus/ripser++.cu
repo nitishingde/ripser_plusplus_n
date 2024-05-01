@@ -3405,6 +3405,8 @@ int main(int argc, char** argv) {
 #ifdef COUNTING
         std::cout << "value range: [" << min << "," << max_finite << "]" << std::endl;
 #endif
+        Stopwatch exec;
+        exec.start();
         if (use_sparse) {
 #ifdef COUNTING
             std::cout << "sparse distance matrix with " << dist.size() << " points and "
@@ -3420,6 +3422,8 @@ int main(int argc, char** argv) {
 #endif
             ripser<compressed_lower_distance_matrix>(std::move(dist), dim_max, threshold, ratio).compute_barcodes();
         }
+        exec.stop();
+        printf("%f\n", exec.ms());
     }
     sw.stop();
 #ifdef INDICATE_PROGRESS
